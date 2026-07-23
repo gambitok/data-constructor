@@ -1,0 +1,10 @@
+.venv/
+.idea/
+__pycache__/
+*.pyc
+
+data/raw/*
+data/processed/*
+data/*.duckdb
+!data/raw/.gitkeep
+!data/processed/.gitkeep
