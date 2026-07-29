@@ -8,5 +8,6 @@ data/processed/*
 data/*.duckdb
 data/*.duckdb.*
 data/*.log
+data/query_templates.json
 !data/raw/.gitkeep
 !data/processed/.gitkeep

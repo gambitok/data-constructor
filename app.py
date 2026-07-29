@@ -2,7 +2,9 @@ import json
 import logging
 import re
 import uuid
+from datetime import datetime, timezone
 from html import escape
+from io import BytesIO
 from pathlib import Path
 
 import duckdb
@@ -15,11 +17,14 @@ import streamlit.components.v1 as components
 DB_PATH = "data/app.duckdb"
 RAW_DIR = Path("data/raw")
 LOG_PATH = Path("data/app.log")
+QUERY_TEMPLATES_PATH = Path("data/query_templates.json")
 CSV_ENCODINGS = ["utf-8-sig", "utf-8", "cp1251", "windows-1251"]
 SUPPORTED_TYPES = ["VARCHAR", "INTEGER", "BIGINT", "DOUBLE", "BOOLEAN", "DATE", "TIMESTAMP"]
 LANGUAGE_CODES = ["en", "uk"]
 THEME_OPTIONS = ["light", "dark"]
+SORT_DIRECTIONS = ["asc", "desc"]
 TRANSLATIONS_PATH = Path("locales/translations.json")
+EXCEL_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 def load_translations() -> dict:
@@ -54,8 +59,194 @@ def theme_label(theme: str) -> str:
     return t("dark_theme") if theme == "dark" else t("light_theme")
 
 
+def sort_direction_label(direction: str) -> str:
+    return t("descending") if direction == "desc" else t("ascending")
+
+
 def language_label(language_code: str) -> str:
     return TRANSLATIONS.get(language_code, {}).get("language_name", language_code)
+
+
+def dataframe_to_excel_bytes(df: pd.DataFrame) -> bytes:
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Data")
+    return output.getvalue()
+
+
+def render_export_buttons(df: pd.DataFrame, filename_base: str) -> None:
+    csv_column, excel_column = st.columns(2)
+    csv = df.to_csv(index=False).encode("utf-8")
+    csv_column.download_button(
+        t("export_csv"),
+        csv,
+        f"{filename_base}.csv",
+        "text/csv",
+        key=f"export_csv_{filename_base}",
+    )
+    excel_column.download_button(
+        t("export_excel"),
+        dataframe_to_excel_bytes(df),
+        f"{filename_base}.xlsx",
+        EXCEL_MIME_TYPE,
+        key=f"export_excel_{filename_base}",
+    )
+
+
+def load_query_templates() -> list[dict]:
+    if not QUERY_TEMPLATES_PATH.exists():
+        return []
+    try:
+        with QUERY_TEMPLATES_PATH.open("r", encoding="utf-8") as templates_file:
+            templates = json.load(templates_file)
+    except Exception:
+        logging.exception("Failed to load query templates")
+        return []
+    return templates if isinstance(templates, list) else []
+
+
+def save_query_templates(templates: list[dict]) -> None:
+    QUERY_TEMPLATES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with QUERY_TEMPLATES_PATH.open("w", encoding="utf-8") as templates_file:
+        json.dump(templates, templates_file, ensure_ascii=False, indent=2)
+
+
+def column_refs_from_labels(
+    labels: list[str],
+    column_options: dict[str, tuple[str, str]],
+) -> list[dict]:
+    return [
+        {"table": column_options[label][0], "column": column_options[label][1]}
+        for label in labels
+        if label in column_options
+    ]
+
+
+def labels_from_column_refs(refs: list[dict], available_labels: list[str]) -> list[str]:
+    labels = []
+    for ref in refs:
+        label = f"{ref.get('table')}.{ref.get('column')}"
+        if label in available_labels:
+            labels.append(label)
+    return labels
+
+
+def normalize_row_limit(value: object) -> int:
+    try:
+        row_limit = int(value)
+    except (TypeError, ValueError):
+        return 1000
+    return min(10000, max(1, row_limit))
+
+
+def make_query_template(
+    name: str,
+    base_table: str,
+    selected_related_tables: list[str],
+    selected_column_labels: list[str],
+    search_text: str,
+    search_column_labels: list[str],
+    sort_label: str,
+    sort_direction: str,
+    row_limit: int,
+    column_options: dict[str, tuple[str, str]],
+    query: str,
+) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    sort_columns = column_refs_from_labels([sort_label], column_options) if sort_label else []
+    return {
+        "id": uuid.uuid4().hex,
+        "name": name.strip(),
+        "base_table": base_table,
+        "related_tables": selected_related_tables,
+        "result_columns": column_refs_from_labels(selected_column_labels, column_options),
+        "search_text": search_text,
+        "search_columns": column_refs_from_labels(search_column_labels, column_options),
+        "sort_column": sort_columns[0] if sort_columns else None,
+        "sort_direction": sort_direction,
+        "row_limit": row_limit,
+        "sql": query,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def upsert_query_template(template: dict) -> None:
+    templates = load_query_templates()
+    existing_index = next(
+        (
+            index
+            for index, existing_template in enumerate(templates)
+            if existing_template.get("name") == template["name"]
+        ),
+        None,
+    )
+    if existing_index is None:
+        templates.append(template)
+    else:
+        template["id"] = templates[existing_index].get("id", template["id"])
+        template["created_at"] = templates[existing_index].get("created_at", template["created_at"])
+        templates[existing_index] = template
+    save_query_templates(templates)
+
+
+def delete_query_template(template_id: str) -> None:
+    templates = [
+        template
+        for template in load_query_templates()
+        if template.get("id") != template_id
+    ]
+    save_query_templates(templates)
+
+
+def render_query_template_manager(tables: list[str]) -> dict | None:
+    templates = load_query_templates()
+
+    with st.expander(t("saved_query_templates")):
+        if not templates:
+            st.caption(t("no_saved_query_templates"))
+            return None
+
+        summary_rows = [
+            {
+                "name": template.get("name", ""),
+                "base_table": template.get("base_table", ""),
+                "related_tables": len(template.get("related_tables", [])),
+                "result_columns": len(template.get("result_columns", [])),
+                "updated_at": template.get("updated_at", ""),
+            }
+            for template in templates
+        ]
+        st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+
+        template_options = {
+            f"{template.get('name', '')} ({template.get('base_table', '')})": template
+            for template in templates
+        }
+        selected_template_label = st.selectbox(
+            t("query_template"),
+            list(template_options.keys()),
+            key="query_template_select",
+        )
+        selected_template = template_options[selected_template_label]
+
+        if selected_template.get("sql"):
+            st.code(selected_template["sql"], language="sql")
+
+        apply_column, delete_column = st.columns(2)
+        if apply_column.button(t("apply_query_template"), key="apply_query_template"):
+            if selected_template.get("base_table") not in tables:
+                st.error(t("query_template_missing_base", table=selected_template.get("base_table", "")))
+                return None
+            st.success(t("query_template_applied", name=selected_template.get("name", "")))
+            return selected_template
+
+        if delete_column.button(t("delete_query_template"), key="delete_query_template"):
+            delete_query_template(str(selected_template.get("id", "")))
+            st.success(t("query_template_deleted", name=selected_template.get("name", "")))
+            st.rerun()
+
+    return None
 
 
 def apply_runtime_theme() -> None:
@@ -423,7 +614,7 @@ def build_related_query(
 
     if sort_column:
         sort_table, sort_col = sort_column
-        direction = "DESC" if sort_direction == t("descending") else "ASC"
+        direction = "DESC" if sort_direction == "desc" else "ASC"
         query += f"\nORDER BY {aliases[sort_table]}.{quote_identifier(sort_col)} {direction}"
 
     query += "\nLIMIT ?"
@@ -1594,9 +1785,15 @@ def render_related_query(con: duckdb.DuckDBPyConnection) -> None:
     if not tables:
         st.info(t("upload_to_start"))
         return
+
+    template_to_apply = render_query_template_manager(tables)
+
     if relationships.empty:
         st.info(t("query_no_relationships"))
         return
+
+    if template_to_apply:
+        st.session_state.query_base_table = template_to_apply.get("base_table")
 
     base_table = st.selectbox(t("base_table"), tables, key="query_base_table")
     paths = get_reachable_tables(base_table, relationships)
@@ -1606,11 +1803,25 @@ def render_related_query(con: duckdb.DuckDBPyConnection) -> None:
         st.info(t("query_no_relationships"))
         return
 
+    related_tables_key = f"query_related_{base_table}"
+    if template_to_apply and template_to_apply.get("base_table") == base_table:
+        st.session_state[related_tables_key] = [
+            table
+            for table in template_to_apply.get("related_tables", [])
+            if table in reachable_tables
+        ]
+    elif related_tables_key in st.session_state:
+        st.session_state[related_tables_key] = [
+            table
+            for table in st.session_state[related_tables_key]
+            if table in reachable_tables
+        ]
+
     selected_related_tables = st.multiselect(
         t("related_tables"),
         reachable_tables,
         default=reachable_tables[:1],
-        key=f"query_related_{base_table}",
+        key=related_tables_key,
     )
     query_tables = [base_table] + selected_related_tables
     column_options = make_column_options(con, query_tables)
@@ -1621,32 +1832,86 @@ def render_related_query(con: duckdb.DuckDBPyConnection) -> None:
         if label.startswith(f"{base_table}.")
     ][:8]
 
+    result_columns_key = f"query_columns_{base_table}_{'_'.join(selected_related_tables)}"
+    if template_to_apply and template_to_apply.get("base_table") == base_table:
+        applied_result_columns = labels_from_column_refs(
+            template_to_apply.get("result_columns", []),
+            option_labels,
+        )
+        st.session_state[result_columns_key] = applied_result_columns or default_columns
+    elif result_columns_key in st.session_state:
+        st.session_state[result_columns_key] = [
+            label
+            for label in st.session_state[result_columns_key]
+            if label in option_labels
+        ]
+
     selected_column_labels = st.multiselect(
         t("result_columns"),
         option_labels,
         default=default_columns,
-        key=f"query_columns_{base_table}_{'_'.join(selected_related_tables)}",
+        key=result_columns_key,
     )
     if not selected_column_labels:
         st.warning(t("select_at_least_one_column"))
         return
 
     search_left, search_right = st.columns([2, 3])
+    if template_to_apply and template_to_apply.get("base_table") == base_table:
+        st.session_state.query_search = template_to_apply.get("search_text", "")
     search = search_left.text_input(t("search_text"), key="query_search")
+    search_columns_key = f"query_search_columns_{base_table}_{'_'.join(selected_related_tables)}"
+    if template_to_apply and template_to_apply.get("base_table") == base_table:
+        applied_search_columns = labels_from_column_refs(
+            template_to_apply.get("search_columns", []),
+            option_labels,
+        )
+        st.session_state[search_columns_key] = applied_search_columns or selected_column_labels
+    elif search_columns_key in st.session_state:
+        st.session_state[search_columns_key] = [
+            label
+            for label in st.session_state[search_columns_key]
+            if label in option_labels
+        ]
     search_column_labels = search_right.multiselect(
         t("search_columns"),
         option_labels,
         default=selected_column_labels,
-        key=f"query_search_columns_{base_table}_{'_'.join(selected_related_tables)}",
+        key=search_columns_key,
     )
 
     sort_left, sort_mid, sort_right = st.columns([2, 1, 1])
-    sort_options = [t("no_sort")] + option_labels
-    sort_label = sort_left.selectbox(t("sort_by"), sort_options, key="query_sort_by")
+    sort_options = [""] + option_labels
+    if template_to_apply and template_to_apply.get("base_table") == base_table:
+        applied_sort_labels = labels_from_column_refs(
+            [template_to_apply.get("sort_column")] if template_to_apply.get("sort_column") else [],
+            option_labels,
+        )
+        st.session_state.query_sort_by = applied_sort_labels[0] if applied_sort_labels else ""
+        st.session_state.query_sort_direction = (
+            template_to_apply.get("sort_direction")
+            if template_to_apply.get("sort_direction") in SORT_DIRECTIONS
+            else "asc"
+        )
+        st.session_state.query_row_limit = normalize_row_limit(template_to_apply.get("row_limit"))
+    elif st.session_state.get("query_sort_by") not in sort_options:
+        st.session_state.query_sort_by = ""
+    if st.session_state.get("query_sort_direction") not in SORT_DIRECTIONS:
+        st.session_state.query_sort_direction = "asc"
+    if "query_row_limit" in st.session_state:
+        st.session_state.query_row_limit = normalize_row_limit(st.session_state.query_row_limit)
+
+    sort_label = sort_left.selectbox(
+        t("sort_by"),
+        sort_options,
+        key="query_sort_by",
+        format_func=lambda option: t("no_sort") if option == "" else option,
+    )
     sort_direction = sort_mid.selectbox(
         t("sort_direction"),
-        [t("ascending"), t("descending")],
+        SORT_DIRECTIONS,
         key="query_sort_direction",
+        format_func=sort_direction_label,
     )
     row_limit = sort_right.number_input(
         t("row_limit"),
@@ -1659,7 +1924,7 @@ def render_related_query(con: duckdb.DuckDBPyConnection) -> None:
 
     selected_columns = [column_options[label] for label in selected_column_labels]
     search_columns = [column_options[label] for label in search_column_labels]
-    sort_column = None if sort_label == t("no_sort") else column_options[sort_label]
+    sort_column = None if sort_label == "" else column_options[sort_label]
 
     try:
         query, params = build_related_query(
@@ -1683,13 +1948,30 @@ def render_related_query(con: duckdb.DuckDBPyConnection) -> None:
         st.code(query, language="sql")
 
     st.dataframe(result, use_container_width=True, hide_index=True)
-    csv = result.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        t("export_csv"),
-        csv,
-        f"{base_table}_related_query.csv",
-        "text/csv",
-    )
+    render_export_buttons(result, f"{base_table}_related_query")
+
+    save_left, save_right = st.columns([3, 1])
+    template_name = save_left.text_input(t("query_template_name"), key="query_template_name")
+    if save_right.button(t("save_query_template"), key="save_query_template"):
+        if not template_name.strip():
+            st.error(t("query_template_name_required"))
+        else:
+            query_template = make_query_template(
+                template_name,
+                base_table,
+                selected_related_tables,
+                selected_column_labels,
+                search,
+                search_column_labels,
+                sort_label,
+                sort_direction,
+                int(row_limit),
+                column_options,
+                query,
+            )
+            upsert_query_template(query_template)
+            st.success(t("query_template_saved", name=query_template["name"]))
+            st.rerun()
 
 
 def render_table_actions(con: duckdb.DuckDBPyConnection, selected_table: str) -> None:
@@ -1951,14 +2233,7 @@ def render_data_browser(con: duckdb.DuckDBPyConnection) -> None:
     result = con.execute(query, params).fetchdf()
 
     st.dataframe(result, use_container_width=True, hide_index=True)
-
-    csv = result.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        t("export_csv"),
-        csv,
-        f"{selected_table}_export.csv",
-        "text/csv",
-    )
+    render_export_buttons(result, f"{selected_table}_export")
 
 
 def main() -> None:

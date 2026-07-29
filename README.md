@@ -17,10 +17,11 @@ The app lets you:
 - create or replace a DuckDB table;
 - define real DuckDB foreign key relationships between imported tables;
 - visualize tables and SQL foreign keys in an ERD-style schema designer;
-- query related tables with joins, selected columns, search, sorting, and export;
+- query related tables with joins, selected columns, search, sorting, and CSV/Excel export;
+- save, apply, and delete related-query templates manually;
 - rename, clear, or delete imported tables;
 - rename columns, change column data types, and edit primary keys with conversion warnings;
-- browse, search, and export table data.
+- browse, search, and export table data to CSV or Excel.
 
 ## Run locally
 
@@ -45,6 +46,7 @@ python -m venv .venv
 ```
 
 Uploaded source files are stored in `data/raw`. The local DuckDB database is `data/app.duckdb`.
+Saved query templates are stored locally in `data/query_templates.json`.
 
 Interface translations are stored in `locales/translations.json`. Add or edit UI text there instead of editing `app.py`.
 
