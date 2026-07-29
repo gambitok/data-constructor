@@ -7,6 +7,7 @@ The app lets you:
 - switch the interface between English and Ukrainian;
 - switch between light and dark themes;
 - upload a CSV or Excel file;
+- store uploaded files under safe generated names;
 - read Cyrillic text from UTF-8 and Windows-1251 CSV files;
 - review an automatically suggested table structure;
 - rename columns before import;
@@ -20,7 +21,7 @@ The app lets you:
 - query related tables with joins, selected columns, search, sorting, and CSV/Excel export;
 - save, apply, and delete related-query templates manually;
 - rename, clear, or delete imported tables;
-- rename columns, change column data types, and edit primary keys with conversion warnings;
+- rename columns, change column data types with conversion-loss diagnostics, and edit primary keys;
 - browse, search, and export table data to CSV or Excel.
 
 ## Run locally

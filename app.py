@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import re
@@ -308,6 +309,20 @@ def normalize_identifier(value: str, fallback: str = "column") -> str:
 
 def quote_identifier(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
+
+
+def short_content_hash(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()[:16]
+
+
+def safe_uploaded_filename(original_name: str, content: bytes) -> str:
+    suffix = Path(original_name).suffix.lower()
+    safe_stem = normalize_identifier(Path(original_name).stem, "upload")
+    return f"{safe_stem}_{short_content_hash(content)}{suffix}"
+
+
+def uploaded_file_signature(original_name: str, content: bytes) -> str:
+    return f"{original_name}:{len(content)}:{short_content_hash(content)}"
 
 
 def unique_identifier(base: str, used: set[str]) -> str:
@@ -792,6 +807,41 @@ def get_relationship_diagnostics(
         "parent_duplicate_count": parent_duplicate_count,
         "orphan_count": orphan_count,
         "sample_orphans": sample_orphans,
+    }
+
+
+def get_type_conversion_diagnostics(
+    con: duckdb.DuckDBPyConnection,
+    table_name: str,
+    column_name: str,
+    target_type: str,
+) -> dict:
+    if target_type not in SUPPORTED_TYPES:
+        raise ValueError(f"Unsupported data type: {target_type}")
+
+    lost_value_count = con.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM {quote_identifier(table_name)}
+        WHERE {quote_identifier(column_name)} IS NOT NULL
+            AND TRY_CAST({quote_identifier(column_name)} AS {target_type}) IS NULL
+        """
+    ).fetchone()[0]
+    sample_lost_values = con.execute(
+        f"""
+        SELECT DISTINCT CAST({quote_identifier(column_name)} AS VARCHAR) AS value
+        FROM {quote_identifier(table_name)}
+        WHERE {quote_identifier(column_name)} IS NOT NULL
+            AND TRY_CAST({quote_identifier(column_name)} AS {target_type}) IS NULL
+        LIMIT 20
+        """
+    ).fetchdf()
+    return {
+        "table": table_name,
+        "column": column_name,
+        "target_type": target_type,
+        "lost_value_count": lost_value_count,
+        "sample_lost_values": sample_lost_values,
     }
 
 
@@ -1832,8 +1882,10 @@ def render_upload_import(con: duckdb.DuckDBPyConnection) -> None:
         return
 
     RAW_DIR.mkdir(parents=True, exist_ok=True)
-    file_path = RAW_DIR / uploaded_file.name
-    file_path.write_bytes(uploaded_file.getbuffer())
+    uploaded_content = uploaded_file.getvalue()
+    file_signature = uploaded_file_signature(uploaded_file.name, uploaded_content)
+    file_path = RAW_DIR / safe_uploaded_filename(uploaded_file.name, uploaded_content)
+    file_path.write_bytes(uploaded_content)
 
     try:
         df, source_info = load_uploaded_data(file_path)
@@ -1852,8 +1904,11 @@ def render_upload_import(con: duckdb.DuckDBPyConnection) -> None:
     table_name = st.text_input(t("table_name"), suggested_table_name)
     table_name = normalize_identifier(table_name, "table")
 
-    if "schema_proposal_file" not in st.session_state or st.session_state.schema_proposal_file != uploaded_file.name:
-        st.session_state.schema_proposal_file = uploaded_file.name
+    if (
+        "schema_proposal_signature" not in st.session_state
+        or st.session_state.schema_proposal_signature != file_signature
+    ):
+        st.session_state.schema_proposal_signature = file_signature
         st.session_state.schema_proposal = make_schema_proposal(df)
 
     st.subheader(t("column_proposal"))
@@ -2386,6 +2441,40 @@ def render_column_editor(con: duckdb.DuckDBPyConnection, selected_table: str) ->
                 for row in type_changes
             )
             st.warning(t("pending_type_changes", changes=changed))
+            conversion_diagnostics = [
+                get_type_conversion_diagnostics(
+                    con,
+                    selected_table,
+                    str(row["current_name"]),
+                    str(row["new_type"]),
+                )
+                for row in type_changes
+            ]
+            conversion_loss_rows = [
+                {
+                    "column": diagnostics["column"],
+                    "new_type": diagnostics["target_type"],
+                    "lost_values": diagnostics["lost_value_count"],
+                }
+                for diagnostics in conversion_diagnostics
+                if diagnostics["lost_value_count"]
+            ]
+            if conversion_loss_rows:
+                st.error(t("type_conversion_loss_warning"))
+                st.dataframe(pd.DataFrame(conversion_loss_rows), use_container_width=True, hide_index=True)
+                for diagnostics in conversion_diagnostics:
+                    if diagnostics["lost_value_count"] and not diagnostics["sample_lost_values"].empty:
+                        st.caption(
+                            t(
+                                "sample_type_conversion_losses",
+                                column=diagnostics["column"],
+                            )
+                        )
+                        st.dataframe(
+                            diagnostics["sample_lost_values"],
+                            use_container_width=True,
+                            hide_index=True,
+                        )
         if column_order_changed:
             st.warning(t("reorder_warning"))
 
