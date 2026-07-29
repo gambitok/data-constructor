@@ -1,4 +1,19 @@
-2026-07-23 15:08:21,557 ERROR Exception in callback _ProactorBasePipeTransport._call_connection_lost()
+2026-07-27 15:57:43,200 ERROR Failed to create SQL foreign key relationship
+Traceback (most recent call last):
+  File "C:\Users\gambi\PhpstormProjects\test\app.py", line 1580, in render_relationships
+    create_sql_foreign_key_relationship(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        con,
+        ^^^^
+    ...<4 lines>...
+        relationship_type,
+        ^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\gambi\PhpstormProjects\test\app.py", line 851, in create_sql_foreign_key_relationship
+    raise ValueError(t("relationship_exists"))
+ValueError: This relationship already exists.
+2026-07-28 17:27:07,198 ERROR Exception in callback _ProactorBasePipeTransport._call_connection_lost()
 handle: <Handle _ProactorBasePipeTransport._call_connection_lost()>
 Traceback (most recent call last):
   File "C:\Users\gambi\AppData\Local\Python\pythoncore-3.14-64\Lib\asyncio\events.py", line 94, in _run

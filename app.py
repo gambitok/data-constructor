@@ -1,5 +1,7 @@
+import json
 import logging
 import re
+import uuid
 from html import escape
 from pathlib import Path
 
@@ -15,154 +17,17 @@ RAW_DIR = Path("data/raw")
 LOG_PATH = Path("data/app.log")
 CSV_ENCODINGS = ["utf-8-sig", "utf-8", "cp1251", "windows-1251"]
 SUPPORTED_TYPES = ["VARCHAR", "INTEGER", "BIGINT", "DOUBLE", "BOOLEAN", "DATE", "TIMESTAMP"]
-LANGUAGE_OPTIONS = {"English": "en", "Українська": "uk"}
+LANGUAGE_CODES = ["en", "uk"]
 THEME_OPTIONS = ["light", "dark"]
-TRANSLATIONS = {
-    "en": {
-        "language": "Language",
-        "theme": "Theme",
-        "light_theme": "Light",
-        "dark_theme": "Dark",
-        "app_title": "Data Constructor",
-        "import": "Import",
-        "relationships": "Relationships",
-        "schema": "Schema",
-        "browse": "Browse",
-        "create_table_from_file": "Create table from file",
-        "upload_file": "Upload CSV or Excel",
-        "details_written": "Details were written to {path}",
-        "preview": "Preview",
-        "table_name": "Table name",
-        "column_proposal": "Column proposal",
-        "include": "Include",
-        "source_column": "Source column",
-        "source_column_help": "Leave empty for a new blank column.",
-        "column_name": "Column name",
-        "data_type": "Data type",
-        "create_or_replace_table": "Create or replace table",
-        "table_created": "Table created: {table}",
-        "need_two_tables": "Create at least two tables to define relationships.",
-        "from_table": "From table",
-        "to_table": "To table",
-        "from_column": "From column",
-        "relationship": "Relationship",
-        "to_column": "To column",
-        "save_relationship": "Save relationship",
-        "relationship_saved": "Relationship saved.",
-        "schema_visualization": "Schema visualization",
-        "need_one_table_schema": "Create at least one table to visualize the schema.",
-        "no_relationships": "No relationships saved yet.",
-        "saved_relationships": "Saved relationships",
-        "tables": "Tables",
-        "inspect_table": "Inspect table",
-        "table_actions": "Table actions",
-        "table_actions_caption": "Rename, clear rows, or delete the selected table.",
-        "new_table_name": "New table name",
-        "rename_table": "Rename table",
-        "different_table_name": "Enter a different table name.",
-        "table_exists": "Table already exists: {table}",
-        "renamed_to": "Renamed to: {table}",
-        "confirm_clear": "Type {table} to confirm clearing rows",
-        "clear_rows": "Clear table rows",
-        "confirmation_mismatch_table": "Confirmation does not match the selected table name.",
-        "rows_cleared": "Rows cleared: {table}",
-        "confirm_delete": "Type DELETE {table} to confirm table deletion",
-        "delete_table": "Delete table",
-        "confirmation_mismatch_required": "Confirmation does not match the required text.",
-        "deleted_table": "Deleted table: {table}",
-        "column_editor": "Column editor",
-        "column_editor_caption": "Rename columns or change data types for the selected table.",
-        "type_change_warning": "Changing a column type can fail or change stored values if existing data cannot be safely converted.",
-        "current_name": "Current name",
-        "new_name": "New name",
-        "current_type": "Current type",
-        "new_type": "New type",
-        "pending_type_changes": "Pending type changes: {changes}",
-        "confirm_apply_columns": "Type APPLY {table} to apply column changes",
-        "apply_column_changes": "Apply column changes",
-        "no_column_changes": "No column changes to apply.",
-        "confirm_type_changes": "Confirm type changes before applying.",
-        "column_changes_applied": "Column changes applied.",
-        "browse_data": "Browse data",
-        "upload_to_start": "Upload a CSV or Excel file to start.",
-        "select_table": "Select table",
-        "search_text": "Search text",
-        "export_csv": "Export visible result to CSV",
-        "unsupported_file_type": "Unsupported file type. Upload CSV, XLSX, or XLSM.",
-    },
-    "uk": {
-        "language": "Мова",
-        "theme": "Тема",
-        "light_theme": "Світла",
-        "dark_theme": "Темна",
-        "app_title": "Data Constructor",
-        "import": "Імпорт",
-        "relationships": "Зв'язки",
-        "schema": "Схема",
-        "browse": "Дані",
-        "create_table_from_file": "Створити таблицю з файлу",
-        "upload_file": "Завантажити CSV або Excel",
-        "details_written": "Деталі записані в {path}",
-        "preview": "Попередній перегляд",
-        "table_name": "Назва таблиці",
-        "column_proposal": "Пропозиція колонок",
-        "include": "Включити",
-        "source_column": "Колонка джерела",
-        "source_column_help": "Залиш порожнім для нової пустої колонки.",
-        "column_name": "Назва колонки",
-        "data_type": "Тип даних",
-        "create_or_replace_table": "Створити або замінити таблицю",
-        "table_created": "Таблицю створено: {table}",
-        "need_two_tables": "Створи щонайменше дві таблиці, щоб додати зв'язки.",
-        "from_table": "З таблиці",
-        "to_table": "До таблиці",
-        "from_column": "З колонки",
-        "relationship": "Зв'язок",
-        "to_column": "До колонки",
-        "save_relationship": "Зберегти зв'язок",
-        "relationship_saved": "Зв'язок збережено.",
-        "schema_visualization": "Візуалізація схеми",
-        "need_one_table_schema": "Створи щонайменше одну таблицю, щоб побачити схему.",
-        "no_relationships": "Збережених зв'язків ще немає.",
-        "saved_relationships": "Збережені зв'язки",
-        "tables": "Таблиці",
-        "inspect_table": "Переглянути таблицю",
-        "table_actions": "Дії з таблицею",
-        "table_actions_caption": "Перейменування, очистка або видалення вибраної таблиці.",
-        "new_table_name": "Нова назва таблиці",
-        "rename_table": "Перейменувати таблицю",
-        "different_table_name": "Введи іншу назву таблиці.",
-        "table_exists": "Таблиця вже існує: {table}",
-        "renamed_to": "Перейменовано на: {table}",
-        "confirm_clear": "Введи {table}, щоб підтвердити очистку рядків",
-        "clear_rows": "Очистити рядки таблиці",
-        "confirmation_mismatch_table": "Підтвердження не збігається з назвою вибраної таблиці.",
-        "rows_cleared": "Рядки очищено: {table}",
-        "confirm_delete": "Введи DELETE {table}, щоб підтвердити видалення таблиці",
-        "delete_table": "Видалити таблицю",
-        "confirmation_mismatch_required": "Підтвердження не збігається з потрібним текстом.",
-        "deleted_table": "Таблицю видалено: {table}",
-        "column_editor": "Редактор колонок",
-        "column_editor_caption": "Перейменування колонок або зміна типів даних вибраної таблиці.",
-        "type_change_warning": "Зміна типу колонки може завершитись помилкою або змінити збережені значення, якщо дані не можна безпечно конвертувати.",
-        "current_name": "Поточна назва",
-        "new_name": "Нова назва",
-        "current_type": "Поточний тип",
-        "new_type": "Новий тип",
-        "pending_type_changes": "Очікувані зміни типів: {changes}",
-        "confirm_apply_columns": "Введи APPLY {table}, щоб застосувати зміни колонок",
-        "apply_column_changes": "Застосувати зміни колонок",
-        "no_column_changes": "Немає змін колонок для застосування.",
-        "confirm_type_changes": "Підтвердь зміни типів перед застосуванням.",
-        "column_changes_applied": "Зміни колонок застосовано.",
-        "browse_data": "Перегляд даних",
-        "upload_to_start": "Завантаж CSV або Excel файл, щоб почати.",
-        "select_table": "Вибрати таблицю",
-        "search_text": "Пошук",
-        "export_csv": "Експорт видимого результату в CSV",
-        "unsupported_file_type": "Непідтримуваний тип файлу. Завантаж CSV, XLSX або XLSM.",
-    },
-}
+TRANSLATIONS_PATH = Path("locales/translations.json")
+
+
+def load_translations() -> dict:
+    with TRANSLATIONS_PATH.open("r", encoding="utf-8") as translations_file:
+        return json.load(translations_file)
+
+
+TRANSLATIONS = load_translations()
 
 logging.basicConfig(
     filename=LOG_PATH,
@@ -187,6 +52,10 @@ def t(key: str, **kwargs) -> str:
 
 def theme_label(theme: str) -> str:
     return t("dark_theme") if theme == "dark" else t("light_theme")
+
+
+def language_label(language_code: str) -> str:
+    return TRANSLATIONS.get(language_code, {}).get("language_name", language_code)
 
 
 def apply_runtime_theme() -> None:
@@ -282,12 +151,18 @@ def make_schema_proposal(df: pl.DataFrame) -> list[dict]:
 
     for column, dtype in zip(df.columns, df.dtypes):
         suggested_name = unique_identifier(normalize_identifier(column), used)
+        source_name = str(column).strip().lower()
+        is_index_column = source_name in {"index", "(index)", "unnamed: 0"} or suggested_name in {
+            "index",
+            "unnamed_0",
+        }
         proposal.append(
             {
-                "include": True,
+                "include": not is_index_column,
                 "source_column": column,
                 "column_name": suggested_name,
                 "data_type": suggest_duckdb_type(dtype),
+                "primary_key": suggested_name == "id",
             }
         )
 
@@ -328,20 +203,49 @@ def load_uploaded_data(file_path: Path) -> tuple[pl.DataFrame, str]:
     raise ValueError(t("unsupported_file_type"))
 
 
-def ensure_meta_tables(con: duckdb.DuckDBPyConnection) -> None:
-    con.execute(
-        """
-        CREATE TABLE IF NOT EXISTS app_relationships (
-            id BIGINT PRIMARY KEY,
-            from_table VARCHAR NOT NULL,
-            from_column VARCHAR NOT NULL,
-            to_table VARCHAR NOT NULL,
-            to_column VARCHAR NOT NULL,
-            relationship_type VARCHAR NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
+def table_exists(con: duckdb.DuckDBPyConnection, table_name: str) -> bool:
+    return bool(
+        con.execute(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_name = ?
+            """,
+            [table_name],
+        ).fetchone()[0]
     )
+
+
+def cleanup_rebuild_tables(con: duckdb.DuckDBPyConnection) -> None:
+    rebuild_tables = [
+        row[0]
+        for row in con.execute(
+            """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = 'main'
+                AND table_name LIKE 'app_rebuild_%'
+            ORDER BY table_name DESC
+            """
+        ).fetchall()
+    ]
+
+    remaining = set(rebuild_tables)
+    while remaining:
+        dropped_in_pass = set()
+        for table_name in sorted(remaining, reverse=True):
+            try:
+                con.execute(f"DROP TABLE {quote_identifier(table_name)}")
+                dropped_in_pass.add(table_name)
+            except Exception:
+                logging.exception("Failed to drop rebuild table: %s", table_name)
+
+        remaining -= dropped_in_pass
+        if not dropped_in_pass:
+            raise ValueError(
+                "Could not clean temporary rebuild tables: "
+                + ", ".join(sorted(remaining))
+            )
 
 
 def list_user_tables(con: duckdb.DuckDBPyConnection) -> list[str]:
@@ -360,11 +264,591 @@ def get_table_schema(con: duckdb.DuckDBPyConnection, table_name: str) -> pd.Data
 def get_relationships(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     return con.execute(
         """
-        SELECT id, from_table, from_column, relationship_type, to_table, to_column, created_at
-        FROM app_relationships
-        ORDER BY created_at DESC
+        SELECT DISTINCT
+            fk.constraint_name AS id,
+            fk_cols.table_name AS from_table,
+            fk_cols.column_name AS from_column,
+            'foreign key' AS relationship_type,
+            pk_cols.table_name AS to_table,
+            pk_cols.column_name AS to_column,
+            NULL::TIMESTAMP AS created_at
+        FROM information_schema.referential_constraints fk
+        JOIN information_schema.key_column_usage fk_cols
+            ON fk.constraint_catalog = fk_cols.constraint_catalog
+            AND fk.constraint_schema = fk_cols.constraint_schema
+            AND fk.constraint_name = fk_cols.constraint_name
+        JOIN information_schema.key_column_usage pk_cols
+            ON fk.unique_constraint_catalog = pk_cols.constraint_catalog
+            AND fk.unique_constraint_schema = pk_cols.constraint_schema
+            AND fk.unique_constraint_name = pk_cols.constraint_name
+            AND fk_cols.position_in_unique_constraint = pk_cols.ordinal_position
+        ORDER BY from_table, from_column, to_table, to_column
         """
     ).fetchdf()
+
+
+def get_column_type(con: duckdb.DuckDBPyConnection, table_name: str, column_name: str) -> str:
+    schema = get_table_schema(con, table_name)
+    matches = schema[schema["column_name"] == column_name]
+    if matches.empty:
+        raise ValueError(f"Column not found: {table_name}.{column_name}")
+    return str(matches.iloc[0]["column_type"])
+
+
+def relationship_edges(relationships: pd.DataFrame) -> list[dict]:
+    return dataframe_relationship_rows(relationships)
+
+
+def get_reachable_tables(base_table: str, relationships: pd.DataFrame) -> dict[str, list[dict]]:
+    edges = relationship_edges(relationships)
+    paths: dict[str, list[dict]] = {base_table: []}
+    queue = [base_table]
+
+    while queue:
+        table = queue.pop(0)
+        for edge in edges:
+            if edge["from_table"] == table:
+                next_table = edge["to_table"]
+            elif edge["to_table"] == table:
+                next_table = edge["from_table"]
+            else:
+                continue
+
+            if next_table in paths:
+                continue
+
+            paths[next_table] = paths[table] + [edge]
+            queue.append(next_table)
+
+    return paths
+
+
+def make_column_options(con: duckdb.DuckDBPyConnection, tables: list[str]) -> dict[str, tuple[str, str]]:
+    options = {}
+    for table in tables:
+        for column in get_columns(con, table):
+            options[f"{table}.{column}"] = (table, column)
+    return options
+
+
+def build_related_query(
+    selected_columns: list[tuple[str, str]],
+    base_table: str,
+    selected_related_tables: list[str],
+    paths: dict[str, list[dict]],
+    search_text: str,
+    search_columns: list[tuple[str, str]],
+    sort_column: tuple[str, str] | None,
+    sort_direction: str,
+    row_limit: int,
+) -> tuple[str, list[str]]:
+    tables_to_join = [base_table] + selected_related_tables
+    aliases = {base_table: "t0"}
+    alias_index = 1
+    join_edges = []
+    seen_edges = set()
+
+    for table in selected_related_tables:
+        for edge in paths.get(table, []):
+            edge_key = (
+                edge["from_table"],
+                edge["from_column"],
+                edge["to_table"],
+                edge["to_column"],
+            )
+            if edge_key not in seen_edges:
+                seen_edges.add(edge_key)
+                join_edges.append(edge)
+
+    join_clauses = []
+    pending = join_edges.copy()
+    while pending:
+        progressed = False
+        for edge in pending.copy():
+            child_table = edge["from_table"]
+            parent_table = edge["to_table"]
+            child_alias = aliases.get(child_table)
+            parent_alias = aliases.get(parent_table)
+
+            if child_alias and not parent_alias:
+                parent_alias = f"t{alias_index}"
+                alias_index += 1
+                aliases[parent_table] = parent_alias
+                join_clauses.append(
+                    f"LEFT JOIN {quote_identifier(parent_table)} {parent_alias} "
+                    f"ON {child_alias}.{quote_identifier(edge['from_column'])} = "
+                    f"{parent_alias}.{quote_identifier(edge['to_column'])}"
+                )
+                pending.remove(edge)
+                progressed = True
+            elif parent_alias and not child_alias:
+                child_alias = f"t{alias_index}"
+                alias_index += 1
+                aliases[child_table] = child_alias
+                join_clauses.append(
+                    f"LEFT JOIN {quote_identifier(child_table)} {child_alias} "
+                    f"ON {child_alias}.{quote_identifier(edge['from_column'])} = "
+                    f"{parent_alias}.{quote_identifier(edge['to_column'])}"
+                )
+                pending.remove(edge)
+                progressed = True
+            elif child_alias and parent_alias:
+                pending.remove(edge)
+                progressed = True
+
+        if not progressed:
+            raise ValueError("Could not build join path for selected tables.")
+
+    for table in tables_to_join:
+        if table not in aliases:
+            aliases[table] = f"t{alias_index}"
+            alias_index += 1
+
+    select_sql = ", ".join(
+        f"{aliases[table]}.{quote_identifier(column)} AS {quote_identifier(table + '__' + column)}"
+        for table, column in selected_columns
+    )
+    query = f"SELECT {select_sql}\nFROM {quote_identifier(base_table)} {aliases[base_table]}"
+    if join_clauses:
+        query += "\n" + "\n".join(join_clauses)
+
+    params = []
+    if search_text and search_columns:
+        conditions = [
+            f"CAST({aliases[table]}.{quote_identifier(column)} AS VARCHAR) ILIKE ?"
+            for table, column in search_columns
+        ]
+        query += "\nWHERE " + " OR ".join(conditions)
+        params.extend([f"%{search_text}%"] * len(search_columns))
+
+    if sort_column:
+        sort_table, sort_col = sort_column
+        direction = "DESC" if sort_direction == t("descending") else "ASC"
+        query += f"\nORDER BY {aliases[sort_table]}.{quote_identifier(sort_col)} {direction}"
+
+    query += "\nLIMIT ?"
+    params.append(row_limit)
+    return query, params
+
+
+def get_primary_key_columns(con: duckdb.DuckDBPyConnection, table_name: str) -> list[str]:
+    rows = con.execute(
+        """
+        SELECT kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+            ON tc.constraint_name = kcu.constraint_name
+            AND tc.table_name = kcu.table_name
+        WHERE tc.constraint_type = 'PRIMARY KEY'
+            AND tc.table_name = ?
+        ORDER BY kcu.ordinal_position
+        """,
+        [table_name],
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
+def ensure_primary_key(con: duckdb.DuckDBPyConnection, table_name: str, column_name: str) -> None:
+    primary_key_columns = get_primary_key_columns(con, table_name)
+    if primary_key_columns == [column_name]:
+        return
+    if primary_key_columns:
+        raise ValueError(
+            f"{table_name} already has primary key: {', '.join(primary_key_columns)}"
+        )
+
+    try:
+        con.execute(
+            f"ALTER TABLE {quote_identifier(table_name)} ADD PRIMARY KEY ({quote_identifier(column_name)})"
+        )
+    except Exception as exc:
+        raise ValueError(t("parent_pk_failed", table=table_name, column=column_name)) from exc
+
+
+def validate_relationship_data(
+    con: duckdb.DuckDBPyConnection,
+    from_table: str,
+    from_column: str,
+    to_table: str,
+    to_column: str,
+) -> None:
+    from_type = get_column_type(con, from_table, from_column)
+    to_type = get_column_type(con, to_table, to_column)
+    if from_type != to_type:
+        raise ValueError(t("column_type_mismatch", from_type=from_type, to_type=to_type))
+
+    invalid_count = con.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM {quote_identifier(from_table)} child
+        WHERE child.{quote_identifier(from_column)} IS NOT NULL
+            AND NOT EXISTS (
+                SELECT 1
+                FROM {quote_identifier(to_table)} parent
+                WHERE parent.{quote_identifier(to_column)} = child.{quote_identifier(from_column)}
+            )
+        """
+    ).fetchone()[0]
+    if invalid_count:
+        raise ValueError(
+            t(
+                "referential_integrity_failed",
+                count=invalid_count,
+                from_table=from_table,
+                from_column=from_column,
+                to_table=to_table,
+                to_column=to_column,
+            )
+        )
+
+
+def relationship_exists(
+    relationships: pd.DataFrame,
+    from_table: str,
+    from_column: str,
+    to_table: str,
+    to_column: str,
+) -> bool:
+    if relationships.empty:
+        return False
+    matches = relationships[
+        (relationships["from_table"] == from_table)
+        & (relationships["from_column"] == from_column)
+        & (relationships["to_table"] == to_table)
+        & (relationships["to_column"] == to_column)
+    ]
+    return not matches.empty
+
+
+def resolve_sql_fk_direction(
+    source_table: str,
+    source_column: str,
+    target_table: str,
+    target_column: str,
+    relationship_type: str,
+) -> tuple[str, str, str, str]:
+    if relationship_type == "many-to-many":
+        raise ValueError(t("many_to_many_requires_junction"))
+    if relationship_type == "one-to-many":
+        return target_table, target_column, source_table, source_column
+    return source_table, source_column, target_table, target_column
+
+
+def get_relationship_diagnostics(
+    con: duckdb.DuckDBPyConnection,
+    child_table: str,
+    child_column: str,
+    parent_table: str,
+    parent_column: str,
+) -> dict:
+    child_type = get_column_type(con, child_table, child_column)
+    parent_type = get_column_type(con, parent_table, parent_column)
+    parent_null_count = con.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM {quote_identifier(parent_table)}
+        WHERE {quote_identifier(parent_column)} IS NULL
+        """
+    ).fetchone()[0]
+    parent_duplicate_count = con.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM (
+            SELECT {quote_identifier(parent_column)}
+            FROM {quote_identifier(parent_table)}
+            WHERE {quote_identifier(parent_column)} IS NOT NULL
+            GROUP BY {quote_identifier(parent_column)}
+            HAVING COUNT(*) > 1
+        )
+        """
+    ).fetchone()[0]
+    orphan_count = con.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM {quote_identifier(child_table)} child
+        WHERE child.{quote_identifier(child_column)} IS NOT NULL
+            AND NOT EXISTS (
+                SELECT 1
+                FROM {quote_identifier(parent_table)} parent
+                WHERE parent.{quote_identifier(parent_column)} = child.{quote_identifier(child_column)}
+            )
+        """
+    ).fetchone()[0]
+    sample_orphans = con.execute(
+        f"""
+        SELECT DISTINCT child.{quote_identifier(child_column)} AS missing_value
+        FROM {quote_identifier(child_table)} child
+        WHERE child.{quote_identifier(child_column)} IS NOT NULL
+            AND NOT EXISTS (
+                SELECT 1
+                FROM {quote_identifier(parent_table)} parent
+                WHERE parent.{quote_identifier(parent_column)} = child.{quote_identifier(child_column)}
+            )
+        LIMIT 20
+        """
+    ).fetchdf()
+    return {
+        "child_type": child_type,
+        "parent_type": parent_type,
+        "parent_null_count": parent_null_count,
+        "parent_duplicate_count": parent_duplicate_count,
+        "orphan_count": orphan_count,
+        "sample_orphans": sample_orphans,
+    }
+
+
+def build_table_constraint_definitions(
+    primary_key_columns: list[str],
+    foreign_key_rows: list[dict],
+) -> list[str]:
+    definitions = []
+    if primary_key_columns:
+        definitions.append(
+            "PRIMARY KEY ("
+            + ", ".join(quote_identifier(column) for column in primary_key_columns)
+            + ")"
+        )
+    definitions.extend(
+        (
+            f"FOREIGN KEY ({quote_identifier(row['from_column'])}) "
+            f"REFERENCES {quote_identifier(row['to_table'])} ({quote_identifier(row['to_column'])})"
+        )
+        for row in foreign_key_rows
+    )
+    return definitions
+
+
+def get_table_foreign_key_rows(con: duckdb.DuckDBPyConnection, table_name: str) -> list[dict]:
+    relationships = get_relationships(con)
+    return [
+        {
+            "from_table": str(row["from_table"]),
+            "from_column": str(row["from_column"]),
+            "to_table": str(row["to_table"]),
+            "to_column": str(row["to_column"]),
+            "relationship_type": str(row["relationship_type"]),
+        }
+        for _, row in relationships[relationships["from_table"] == table_name].iterrows()
+    ]
+
+
+def dataframe_relationship_rows(relationships: pd.DataFrame) -> list[dict]:
+    if relationships.empty:
+        return []
+    return [
+        {
+            "from_table": str(row["from_table"]),
+            "from_column": str(row["from_column"]),
+            "to_table": str(row["to_table"]),
+            "to_column": str(row["to_column"]),
+            "relationship_type": str(row["relationship_type"]),
+        }
+        for _, row in relationships.iterrows()
+    ]
+
+
+def get_referencing_subtree(
+    relationships: pd.DataFrame,
+    table_name: str,
+) -> list[str]:
+    visited: set[str] = set()
+    ordered: list[str] = []
+
+    def visit(parent_table: str) -> None:
+        children = sorted(
+            set(
+                str(row["from_table"])
+                for _, row in relationships[relationships["to_table"] == parent_table].iterrows()
+                if str(row["from_table"]) != parent_table
+            )
+        )
+        for child_table in children:
+            if child_table in visited:
+                continue
+            visited.add(child_table)
+            visit(child_table)
+            ordered.append(child_table)
+
+    visit(table_name)
+    return ordered
+
+
+def rebuild_table_with_constraints(
+    con: duckdb.DuckDBPyConnection,
+    table_name: str,
+    primary_key_columns: list[str],
+    foreign_key_rows: list[dict] | None = None,
+    column_order: list[str] | None = None,
+) -> None:
+    schema = get_table_schema(con, table_name)
+    temp_table = normalize_identifier(f"app_rebuild_{table_name}_{uuid.uuid4().hex[:8]}", "tmp")
+    if foreign_key_rows is None:
+        foreign_key_rows = get_table_foreign_key_rows(con, table_name)
+    if column_order:
+        schema = (
+            schema.assign(
+                sort_order=schema["column_name"].map(
+                    {column: index for index, column in enumerate(column_order)}
+                )
+            )
+            .sort_values("sort_order")
+            .drop(columns=["sort_order"])
+        )
+    column_definitions = [
+        f"{quote_identifier(str(row['column_name']))} {row['column_type']}"
+        for _, row in schema.iterrows()
+    ]
+    constraint_definitions = build_table_constraint_definitions(primary_key_columns, foreign_key_rows)
+    columns_sql = ", ".join(
+        quote_identifier(str(row["column_name"]))
+        for _, row in schema.iterrows()
+    )
+
+    con.execute("BEGIN")
+    try:
+        con.execute(
+            f"""
+            CREATE TABLE {quote_identifier(temp_table)} (
+                {", ".join(column_definitions)}
+            )
+            """
+        )
+        con.execute(
+            f"""
+            INSERT INTO {quote_identifier(temp_table)} ({columns_sql})
+            SELECT {columns_sql}
+            FROM {quote_identifier(table_name)}
+            """
+        )
+        con.execute(f"DROP TABLE {quote_identifier(table_name)}")
+        con.execute(
+            f"""
+            CREATE TABLE {quote_identifier(table_name)} (
+                {", ".join(column_definitions + constraint_definitions)}
+            )
+            """
+        )
+        con.execute(
+            f"""
+            INSERT INTO {quote_identifier(table_name)} ({columns_sql})
+            SELECT {columns_sql}
+            FROM {quote_identifier(temp_table)}
+            """
+        )
+        con.execute(f"DROP TABLE {quote_identifier(temp_table)}")
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        cleanup_rebuild_tables(con)
+        raise
+
+
+def rebuild_table_preserving_references(
+    con: duckdb.DuckDBPyConnection,
+    table_name: str,
+    primary_key_columns: list[str],
+    foreign_key_rows: list[dict],
+    column_order: list[str] | None = None,
+) -> None:
+    relationships_before = get_relationships(con)
+    all_relationship_rows = dataframe_relationship_rows(relationships_before)
+    referencing_subtree = get_referencing_subtree(relationships_before, table_name)
+
+    # Detach deepest children first, so DuckDB allows rebuilding their parents.
+    for child_table in referencing_subtree:
+        rebuild_table_with_constraints(
+            con,
+            child_table,
+            get_primary_key_columns(con, child_table),
+            [],
+        )
+
+    rebuild_table_with_constraints(
+        con,
+        table_name,
+        primary_key_columns,
+        foreign_key_rows,
+        column_order,
+    )
+
+    # Restore parents before children, so referenced keys already exist.
+    for child_table in reversed(referencing_subtree):
+        child_relationships = [
+            row for row in all_relationship_rows if row["from_table"] == child_table
+        ]
+        for relationship in child_relationships:
+            validate_relationship_data(
+                con,
+                relationship["from_table"],
+                relationship["from_column"],
+                relationship["to_table"],
+                relationship["to_column"],
+            )
+            ensure_primary_key(con, relationship["to_table"], relationship["to_column"])
+        rebuild_table_with_constraints(
+            con,
+            child_table,
+            get_primary_key_columns(con, child_table),
+            child_relationships,
+        )
+
+
+def create_sql_foreign_key_relationship(
+    con: duckdb.DuckDBPyConnection,
+    from_table: str,
+    from_column: str,
+    to_table: str,
+    to_column: str,
+    relationship_type: str,
+) -> None:
+    if from_table == to_table:
+        raise ValueError(t("same_table_fk_not_supported"))
+
+    cleanup_rebuild_tables(con)
+
+    relationships = get_relationships(con)
+    if relationship_exists(relationships, from_table, from_column, to_table, to_column):
+        raise ValueError(t("relationship_exists"))
+
+    validate_relationship_data(con, from_table, from_column, to_table, to_column)
+    ensure_primary_key(con, to_table, to_column)
+
+    child_relationships = [
+        {
+            "from_table": str(row["from_table"]),
+            "from_column": str(row["from_column"]),
+            "to_table": str(row["to_table"]),
+            "to_column": str(row["to_column"]),
+            "relationship_type": str(row["relationship_type"]),
+        }
+        for _, row in relationships[relationships["from_table"] == from_table].iterrows()
+    ]
+    child_relationships.append(
+        {
+            "from_table": from_table,
+            "from_column": from_column,
+            "to_table": to_table,
+            "to_column": to_column,
+            "relationship_type": relationship_type,
+        }
+    )
+
+    for relationship in child_relationships:
+        validate_relationship_data(
+            con,
+            relationship["from_table"],
+            relationship["from_column"],
+            relationship["to_table"],
+            relationship["to_column"],
+        )
+        ensure_primary_key(con, relationship["to_table"], relationship["to_column"])
+
+    rebuild_table_preserving_references(
+        con,
+        from_table,
+        get_primary_key_columns(con, from_table),
+        child_relationships,
+    )
 
 
 def get_related_columns(relationships: pd.DataFrame) -> set[tuple[str, str]]:
@@ -397,10 +881,12 @@ def build_schema_designer_html(
         "line": "#60a5fa" if dark else "#2563eb",
         "label_stroke": "#0f172a" if dark else "#ffffff",
     }
-    card_width = 300
-    card_gap_x = 110
-    card_gap_y = 92
+    card_width = 340
+    card_gap_x = 190
+    card_gap_y = 220
     columns_per_row = 3
+    header_height = 40
+    row_height = 34
     top_lane_base = 28
     top_lane_step = 18
     side_lane_step = 18
@@ -419,7 +905,7 @@ def build_schema_designer_html(
     for index, table in enumerate(tables):
         schema = get_table_schema(con, table)
         row = index // columns_per_row
-        height = 58 + max(len(schema), 1) * 34
+        height = header_height + max(len(schema), 1) * row_height
 
         table_schemas[table] = schema
         row_heights[row] = max(row_heights.get(row, 0), height)
@@ -436,7 +922,7 @@ def build_schema_designer_html(
         col = index % columns_per_row
         x = 40 + col * (card_width + card_gap_x)
         y = row_offsets[row]
-        height = 58 + max(len(schema), 1) * 34
+        height = header_height + max(len(schema), 1) * row_height
 
         table_positions[table] = (x, y)
         table_heights[table] = height
@@ -448,7 +934,7 @@ def build_schema_designer_html(
             column_type = str(column_row["column_type"])
             column_title = f"{column_name}: {column_type}"
             is_related = (table, column_name) in related_columns
-            column_y = y + 58 + column_index * 34 + 17
+            column_y = y + header_height + column_index * row_height + row_height / 2
             column_anchors[(table, column_name)] = {
                 "left": (x, column_y),
                 "right": (x + card_width, column_y),
@@ -511,8 +997,6 @@ def build_schema_designer_html(
             start_x, start_y = from_anchor["right"]
             end_x, end_y = to_anchor["right"]
             loop_x = start_x + 42 + lane * side_lane_step
-            label_x = loop_x + 18
-            label_y = min(start_y, end_y) + abs(end_y - start_y) / 2
             path = f"M {start_x} {start_y} L {loop_x} {start_y} L {loop_x} {end_y} L {end_x} {end_y}"
         elif is_adjacent_same_row:
             lane = next_route_lane(("gap", from_row, min(from_col, to_col), max(from_col, to_col)))
@@ -530,8 +1014,6 @@ def build_schema_designer_html(
                 bus_y = top_bus_y
                 start_lane_x = lane_x
                 end_lane_x = lane_x
-                label_x = min(start_x, end_x) + abs(end_x - start_x) / 2
-                label_y = bus_y - 4
                 path = (
                     f"M {start_x} {start_y} "
                     f"L {start_lane_x} {start_y} "
@@ -541,16 +1023,12 @@ def build_schema_designer_html(
                     f"L {end_x} {end_y}"
                 )
             else:
-                label_x = lane_x
-                label_y = min(start_y, end_y) + abs(end_y - start_y) / 2 - 8
                 path = f"M {start_x} {start_y} L {lane_x} {start_y} L {lane_x} {end_y} L {end_x} {end_y}"
         elif from_col == to_col:
             lane = next_route_lane(("same-col", from_col, min(from_row, to_row), max(from_row, to_row)))
             start_x, start_y = from_anchor["right"]
             end_x, end_y = to_anchor["right"]
             lane_x = start_x + 34 + lane * side_lane_step
-            label_x = lane_x + 18
-            label_y = min(start_y, end_y) + abs(end_y - start_y) / 2
             path = (
                 f"M {start_x} {start_y} "
                 f"L {lane_x} {start_y} "
@@ -564,8 +1042,6 @@ def build_schema_designer_html(
             bus_y = top_lane_base + lane * top_lane_step if from_row <= to_row else bottom_bus_y
             start_lane_x = start_x + 28
             end_lane_x = end_x - 28
-            label_x = start_lane_x + (end_lane_x - start_lane_x) / 2
-            label_y = bus_y - 4
             path = (
                 f"M {start_x} {start_y} "
                 f"L {start_lane_x} {start_y} "
@@ -581,8 +1057,6 @@ def build_schema_designer_html(
             bus_y = top_lane_base + lane * top_lane_step if from_row <= to_row else bottom_bus_y
             start_lane_x = max(left_bus_x, start_x - 28)
             end_lane_x = end_x + 28
-            label_x = start_lane_x + (end_lane_x - start_lane_x) / 2
-            label_y = bus_y - 4
             path = (
                 f"M {start_x} {start_y} "
                 f"L {start_lane_x} {start_y} "
@@ -592,21 +1066,83 @@ def build_schema_designer_html(
                 f"L {end_x} {end_y}"
             )
 
-        label = escape(
-            f'{relationship["from_column"]} -> {relationship["to_column"]} ({relationship["relationship_type"]})'
-        )
-
         lines.append(
             f"""
             <path d="{path}" />
             <circle cx="{start_x}" cy="{start_y}" r="4"></circle>
             <circle cx="{end_x}" cy="{end_y}" r="4"></circle>
-            <text x="{label_x}" y="{label_y}" text-anchor="middle">{label}</text>
             """
         )
 
     return f"""
     <style>
+        .erd-shell,
+        .erd-shell * {{
+            box-sizing: border-box;
+        }}
+        .erd-shell {{
+            --erd-canvas-bg: {palette["canvas_bg"]};
+            --erd-grid: {palette["grid"]};
+            --erd-border: {palette["border"]};
+            --erd-table-bg: {palette["table_bg"]};
+            --erd-table-border: {palette["table_border"]};
+            --erd-header-bg: {palette["header_bg"]};
+            --erd-header-border: {palette["header_border"]};
+            --erd-text: {palette["text"]};
+            --erd-muted: {palette["muted"]};
+            --erd-row-border: {palette["row_border"]};
+            --erd-related-bg: {palette["related_bg"]};
+            --erd-dot: {palette["dot"]};
+            --erd-line: {palette["line"]};
+            --erd-label-stroke: {palette["label_stroke"]};
+            position: relative;
+            width: 100%;
+            height: 100vh;
+            min-height: 680px;
+            border: 1px solid var(--erd-border);
+            border-radius: 6px;
+            overflow: hidden;
+            background: var(--erd-canvas-bg);
+        }}
+        .erd-shell:fullscreen {{
+            width: 100vw;
+            height: 100vh;
+            min-height: 100vh;
+            border: 0;
+            border-radius: 0;
+        }}
+        .erd-toolbar {{
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            z-index: 5;
+            display: flex;
+            gap: 8px;
+        }}
+        .erd-fullscreen-btn {{
+            border: 1px solid var(--erd-border);
+            background: var(--erd-table-bg);
+            color: var(--erd-text);
+            border-radius: 4px;
+            padding: 7px 10px;
+            font: 600 12px Arial, sans-serif;
+            cursor: pointer;
+            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.16);
+        }}
+        .erd-fullscreen-btn:hover {{
+            border-color: var(--erd-line);
+        }}
+        .erd-zoom-value {{
+            border: 1px solid var(--erd-border);
+            background: var(--erd-table-bg);
+            color: var(--erd-text);
+            border-radius: 4px;
+            padding: 7px 9px;
+            font: 600 12px Arial, sans-serif;
+            min-width: 54px;
+            text-align: center;
+            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.16);
+        }}
         .erd-canvas {{
             --erd-canvas-bg: {palette["canvas_bg"]};
             --erd-grid: {palette["grid"]};
@@ -627,14 +1163,21 @@ def build_schema_designer_html(
             height: {canvas_height}px;
             min-width: 100%;
             overflow: auto;
-            border: 1px solid var(--erd-border);
             background:
                 linear-gradient(var(--erd-grid) 23px, transparent 24px),
                 linear-gradient(90deg, var(--erd-grid) 23px, transparent 24px),
                 var(--erd-canvas-bg);
             background-size: 24px 24px;
-            border-radius: 6px;
             font-family: Arial, sans-serif;
+            transform-origin: top left;
+        }}
+        .erd-stage {{
+            width: {canvas_width}px;
+            height: {canvas_height}px;
+        }}
+        .erd-shell:fullscreen .erd-canvas {{
+            min-width: {canvas_width}px;
+            min-height: {canvas_height}px;
         }}
         .erd-lines {{
             position: absolute;
@@ -654,14 +1197,6 @@ def build_schema_designer_html(
             stroke: var(--erd-line);
             stroke-width: 2;
         }}
-        .erd-lines text {{
-            fill: var(--erd-line);
-            font-size: 11px;
-            paint-order: stroke;
-            stroke: var(--erd-label-stroke);
-            stroke-width: 4px;
-            stroke-linejoin: round;
-        }}
         .erd-table {{
             position: absolute;
             z-index: 2;
@@ -674,9 +1209,13 @@ def build_schema_designer_html(
         .erd-table header {{
             background: var(--erd-header-bg);
             color: #ffffff;
+            display: flex;
+            align-items: center;
+            height: {header_height}px;
             font-weight: 700;
             font-size: 13px;
-            padding: 10px 12px;
+            line-height: 1.2;
+            padding: 0 12px;
             border-bottom: 1px solid var(--erd-header-border);
             overflow: hidden;
             text-overflow: ellipsis;
@@ -690,10 +1229,12 @@ def build_schema_designer_html(
             grid-template-columns: 32px minmax(0, 1fr) max-content;
             align-items: center;
             column-gap: 8px;
-            min-height: 34px;
-            padding: 7px 10px;
+            height: {row_height}px;
+            min-height: {row_height}px;
+            padding: 0 10px;
             border-bottom: 1px solid var(--erd-row-border);
             font-size: 12px;
+            line-height: 1.2;
             color: var(--erd-text);
         }}
         .erd-column:last-child {{
@@ -737,17 +1278,52 @@ def build_schema_designer_html(
             flex: 0 0 auto;
         }}
     </style>
-    <div class="erd-canvas">
-        <svg class="erd-lines" viewBox="0 0 {canvas_width} {canvas_height}">
-            <defs>
-                <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="{palette["line"]}"></path>
-                </marker>
-            </defs>
-            {''.join(lines)}
-        </svg>
-        {''.join(cards)}
+    <div class="erd-shell" id="erd-shell">
+        <div class="erd-toolbar">
+            <button class="erd-fullscreen-btn" type="button" onclick="setErdZoom(-0.1)">-</button>
+            <span class="erd-zoom-value" id="erd-zoom-value">100%</span>
+            <button class="erd-fullscreen-btn" type="button" onclick="setErdZoom(0.1)">+</button>
+            <button class="erd-fullscreen-btn" type="button" onclick="toggleErdFullscreen()">{escape(t("fullscreen"))}</button>
+        </div>
+        <div class="erd-stage" id="erd-stage">
+            <div class="erd-canvas">
+                <svg class="erd-lines" viewBox="0 0 {canvas_width} {canvas_height}">
+                    <defs>
+                        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="{palette["line"]}"></path>
+                        </marker>
+                    </defs>
+                    {''.join(lines)}
+                </svg>
+                {''.join(cards)}
+            </div>
+        </div>
     </div>
+    <script>
+        let erdZoom = 1;
+        function applyErdZoom() {{
+            const canvas = document.querySelector('.erd-canvas');
+            const stage = document.getElementById('erd-stage');
+            const value = document.getElementById('erd-zoom-value');
+            canvas.style.transform = `scale(${{erdZoom}})`;
+            stage.style.width = `${{{canvas_width} * erdZoom}}px`;
+            stage.style.height = `${{{canvas_height} * erdZoom}}px`;
+            value.textContent = `${{Math.round(erdZoom * 100)}}%`;
+        }}
+        function setErdZoom(delta) {{
+            erdZoom = Math.min(2, Math.max(0.4, Number((erdZoom + delta).toFixed(2))));
+            applyErdZoom();
+        }}
+        function toggleErdFullscreen() {{
+            const shell = document.getElementById('erd-shell');
+            if (!document.fullscreenElement) {{
+                shell.requestFullscreen();
+            }} else {{
+                document.exitFullscreen();
+            }}
+        }}
+        applyErdZoom();
+    </script>
     """
 
 
@@ -762,16 +1338,24 @@ def create_table_from_schema(
         raise ValueError("Select at least one column.")
 
     used: set[str] = set()
+    created_columns = []
     select_parts = []
+    column_definitions = []
+    primary_key_columns = []
     for row in selected_rows:
         column_name = normalize_identifier(str(row["column_name"]))
         if column_name in used:
             raise ValueError(f"Duplicate column name: {column_name}")
         used.add(column_name)
+        created_columns.append(column_name)
 
         data_type = row["data_type"]
         if data_type not in SUPPORTED_TYPES:
             raise ValueError(f"Unsupported data type: {data_type}")
+
+        column_definitions.append(f"{quote_identifier(column_name)} {data_type}")
+        if row.get("primary_key"):
+            primary_key_columns.append(column_name)
 
         source_column = row.get("source_column")
         if source_column:
@@ -783,11 +1367,22 @@ def create_table_from_schema(
             f"TRY_CAST({source_sql} AS {data_type}) AS {quote_identifier(column_name)}"
         )
 
+    constraints = build_table_constraint_definitions(primary_key_columns, [])
+    columns_sql = ", ".join(quote_identifier(column) for column in created_columns)
+
     con.register("uploaded_df", df)
     try:
+        con.execute(f"DROP TABLE IF EXISTS {quote_identifier(table_name)}")
         con.execute(
             f"""
-            CREATE OR REPLACE TABLE {quote_identifier(table_name)} AS
+            CREATE TABLE {quote_identifier(table_name)} (
+                {", ".join(column_definitions + constraints)}
+            )
+            """
+        )
+        con.execute(
+            f"""
+            INSERT INTO {quote_identifier(table_name)} ({columns_sql})
             SELECT {", ".join(select_parts)}
             FROM uploaded_df
             """
@@ -819,7 +1414,7 @@ def render_upload_import(con: duckdb.DuckDBPyConnection) -> None:
 
     st.caption(source_info)
     st.subheader(t("preview"))
-    st.dataframe(df.head(25).to_pandas(), use_container_width=True)
+    st.dataframe(df.head(25).to_pandas(), use_container_width=True, hide_index=True)
 
     table_name = st.text_input(t("table_name"), suggested_table_name)
     table_name = normalize_identifier(table_name, "table")
@@ -842,6 +1437,7 @@ def render_upload_import(con: duckdb.DuckDBPyConnection) -> None:
             ),
             "column_name": st.column_config.TextColumn(t("column_name"), required=True),
             "data_type": st.column_config.SelectboxColumn(t("data_type"), options=SUPPORTED_TYPES, required=True),
+            "primary_key": st.column_config.CheckboxColumn(t("primary_key"), help=t("primary_key_warning")),
         },
         hide_index=True,
     )
@@ -865,6 +1461,8 @@ def render_relationships(con: duckdb.DuckDBPyConnection) -> None:
         st.info(t("need_two_tables"))
         return
 
+    st.info(t("relationship_direction_help"))
+
     left, right = st.columns(2)
     from_table = left.selectbox(t("from_table"), tables, key="from_table")
     to_table = right.selectbox(t("to_table"), tables, key="to_table")
@@ -877,17 +1475,81 @@ def render_relationships(con: duckdb.DuckDBPyConnection) -> None:
     relationship_type = rel_mid.selectbox(t("relationship"), ["many-to-one", "one-to-one", "one-to-many", "many-to-many"])
     to_column = rel_right.selectbox(t("to_column"), to_columns)
 
-    if st.button(t("save_relationship")):
-        next_id = con.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM app_relationships").fetchone()[0]
-        con.execute(
-            """
-            INSERT INTO app_relationships
-                (id, from_table, from_column, to_table, to_column, relationship_type)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            [next_id, from_table, from_column, to_table, to_column, relationship_type],
+    try:
+        child_table, child_column, parent_table, parent_column = resolve_sql_fk_direction(
+            from_table,
+            from_column,
+            to_table,
+            to_column,
+            relationship_type,
         )
-        st.success(t("relationship_saved"))
+        st.caption(
+            t(
+                "resolved_fk_direction",
+                child_table=child_table,
+                child_column=child_column,
+                parent_table=parent_table,
+                parent_column=parent_column,
+            )
+        )
+    except Exception as exc:
+        child_table = child_column = parent_table = parent_column = None
+        st.error(str(exc))
+
+    if st.button(t("check_relationship"), disabled=child_table is None):
+        try:
+            diagnostics = get_relationship_diagnostics(
+                con,
+                child_table,
+                child_column,
+                parent_table,
+                parent_column,
+            )
+            st.subheader(t("relationship_check_title"))
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {"check": "child_type", "value": diagnostics["child_type"]},
+                        {"check": "parent_type", "value": diagnostics["parent_type"]},
+                        {"check": t("parent_nulls"), "value": diagnostics["parent_null_count"]},
+                        {"check": t("parent_duplicates"), "value": diagnostics["parent_duplicate_count"]},
+                        {"check": t("orphan_values"), "value": diagnostics["orphan_count"]},
+                    ]
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+            if not diagnostics["sample_orphans"].empty:
+                st.caption(t("sample_orphans"))
+                st.dataframe(diagnostics["sample_orphans"], use_container_width=True, hide_index=True)
+            if (
+                diagnostics["child_type"] == diagnostics["parent_type"]
+                and diagnostics["parent_null_count"] == 0
+                and diagnostics["parent_duplicate_count"] == 0
+                and diagnostics["orphan_count"] == 0
+            ):
+                st.success(t("relationship_check_ok"))
+        except Exception as exc:
+            logging.exception("Failed to check SQL foreign key relationship")
+            st.error(str(exc))
+
+    if st.button(t("save_relationship")):
+        try:
+            if child_table is None:
+                raise ValueError(t("many_to_many_requires_junction"))
+            create_sql_foreign_key_relationship(
+                con,
+                child_table,
+                child_column,
+                parent_table,
+                parent_column,
+                relationship_type,
+            )
+            st.success(t("relationship_real_fk_saved"))
+            st.rerun()
+        except Exception as exc:
+            logging.exception("Failed to create SQL foreign key relationship")
+            st.error(str(exc))
 
     relationships = get_relationships(con).drop(columns=["id"])
 
@@ -906,7 +1568,7 @@ def render_schema_visualization(con: duckdb.DuckDBPyConnection) -> None:
         return
 
     diagram_html = build_schema_designer_html(con, tables, relationships)
-    components.html(diagram_html, height=680, scrolling=True)
+    components.html(diagram_html, height=900, scrolling=True)
 
     if relationships.empty:
         st.info(t("no_relationships"))
@@ -921,6 +1583,113 @@ def render_schema_visualization(con: duckdb.DuckDBPyConnection) -> None:
     st.subheader(t("tables"))
     selected_table = st.selectbox(t("inspect_table"), tables, key="schema_table")
     st.dataframe(get_table_schema(con, selected_table), use_container_width=True, hide_index=True)
+
+
+def render_related_query(con: duckdb.DuckDBPyConnection) -> None:
+    tables = list_user_tables(con)
+    relationships = get_relationships(con)
+
+    st.header(t("query_related_data"))
+
+    if not tables:
+        st.info(t("upload_to_start"))
+        return
+    if relationships.empty:
+        st.info(t("query_no_relationships"))
+        return
+
+    base_table = st.selectbox(t("base_table"), tables, key="query_base_table")
+    paths = get_reachable_tables(base_table, relationships)
+    reachable_tables = sorted([table for table in paths.keys() if table != base_table])
+
+    if not reachable_tables:
+        st.info(t("query_no_relationships"))
+        return
+
+    selected_related_tables = st.multiselect(
+        t("related_tables"),
+        reachable_tables,
+        default=reachable_tables[:1],
+        key=f"query_related_{base_table}",
+    )
+    query_tables = [base_table] + selected_related_tables
+    column_options = make_column_options(con, query_tables)
+    option_labels = list(column_options.keys())
+    default_columns = [
+        label
+        for label in option_labels
+        if label.startswith(f"{base_table}.")
+    ][:8]
+
+    selected_column_labels = st.multiselect(
+        t("result_columns"),
+        option_labels,
+        default=default_columns,
+        key=f"query_columns_{base_table}_{'_'.join(selected_related_tables)}",
+    )
+    if not selected_column_labels:
+        st.warning(t("select_at_least_one_column"))
+        return
+
+    search_left, search_right = st.columns([2, 3])
+    search = search_left.text_input(t("search_text"), key="query_search")
+    search_column_labels = search_right.multiselect(
+        t("search_columns"),
+        option_labels,
+        default=selected_column_labels,
+        key=f"query_search_columns_{base_table}_{'_'.join(selected_related_tables)}",
+    )
+
+    sort_left, sort_mid, sort_right = st.columns([2, 1, 1])
+    sort_options = [t("no_sort")] + option_labels
+    sort_label = sort_left.selectbox(t("sort_by"), sort_options, key="query_sort_by")
+    sort_direction = sort_mid.selectbox(
+        t("sort_direction"),
+        [t("ascending"), t("descending")],
+        key="query_sort_direction",
+    )
+    row_limit = sort_right.number_input(
+        t("row_limit"),
+        min_value=1,
+        max_value=10000,
+        value=1000,
+        step=100,
+        key="query_row_limit",
+    )
+
+    selected_columns = [column_options[label] for label in selected_column_labels]
+    search_columns = [column_options[label] for label in search_column_labels]
+    sort_column = None if sort_label == t("no_sort") else column_options[sort_label]
+
+    try:
+        query, params = build_related_query(
+            selected_columns,
+            base_table,
+            selected_related_tables,
+            paths,
+            search,
+            search_columns,
+            sort_column,
+            sort_direction,
+            int(row_limit),
+        )
+        result = con.execute(query, params).fetchdf()
+    except Exception as exc:
+        logging.exception("Failed to run related table query")
+        st.error(str(exc))
+        return
+
+    with st.expander(t("show_sql")):
+        st.code(query, language="sql")
+
+    st.dataframe(result, use_container_width=True, hide_index=True)
+    csv = result.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        t("export_csv"),
+        csv,
+        f"{base_table}_related_query.csv",
+        "text/csv",
+    )
 
 
 def render_table_actions(con: duckdb.DuckDBPyConnection, selected_table: str) -> None:
@@ -944,14 +1713,6 @@ def render_table_actions(con: duckdb.DuckDBPyConnection, selected_table: str) ->
                 else:
                     con.execute(
                         f"ALTER TABLE {quote_identifier(selected_table)} RENAME TO {quote_identifier(normalized_new_name)}"
-                    )
-                    con.execute(
-                        "UPDATE app_relationships SET from_table = ? WHERE from_table = ?",
-                        [normalized_new_name, selected_table],
-                    )
-                    con.execute(
-                        "UPDATE app_relationships SET to_table = ? WHERE to_table = ?",
-                        [normalized_new_name, selected_table],
                     )
                     st.success(t("renamed_to", table=normalized_new_name))
                     st.rerun()
@@ -985,10 +1746,6 @@ def render_table_actions(con: duckdb.DuckDBPyConnection, selected_table: str) ->
             else:
                 try:
                     con.execute(f"DROP TABLE {quote_identifier(selected_table)}")
-                    con.execute(
-                        "DELETE FROM app_relationships WHERE from_table = ? OR to_table = ?",
-                        [selected_table, selected_table],
-                    )
                     st.success(t("deleted_table", table=selected_table))
                     st.rerun()
                 except Exception as exc:
@@ -1002,28 +1759,35 @@ def render_column_editor(con: duckdb.DuckDBPyConnection, selected_table: str) ->
         st.warning(t("type_change_warning"))
 
         schema = get_table_schema(con, selected_table)
+        current_primary_keys = get_primary_key_columns(con, selected_table)
         editable_schema = [
             {
+                "position": index + 1,
                 "current_name": str(row["column_name"]),
                 "new_name": str(row["column_name"]),
                 "current_type": str(row["column_type"]),
                 "new_type": str(row["column_type"])
                 if str(row["column_type"]) in SUPPORTED_TYPES
                 else "VARCHAR",
+                "current_primary_key": str(row["column_name"]) in current_primary_keys,
+                "new_primary_key": str(row["column_name"]) in current_primary_keys,
             }
-            for _, row in schema.iterrows()
+            for index, (_, row) in enumerate(schema.iterrows())
         ]
 
         edited_columns = st.data_editor(
             editable_schema,
             use_container_width=True,
             hide_index=True,
-            disabled=["current_name", "current_type"],
+            disabled=["current_name", "current_type", "current_primary_key"],
             column_config={
+                "position": st.column_config.NumberColumn(t("position"), min_value=1, step=1, required=True),
                 "current_name": st.column_config.TextColumn(t("current_name")),
                 "new_name": st.column_config.TextColumn(t("new_name"), required=True),
                 "current_type": st.column_config.TextColumn(t("current_type")),
                 "new_type": st.column_config.SelectboxColumn(t("new_type"), options=SUPPORTED_TYPES, required=True),
+                "current_primary_key": st.column_config.CheckboxColumn(t("primary_key")),
+                "new_primary_key": st.column_config.CheckboxColumn(t("primary_key"), help=t("primary_key_warning")),
             },
             key=f"columns_editor_{selected_table}",
         )
@@ -1036,6 +1800,22 @@ def render_column_editor(con: duckdb.DuckDBPyConnection, selected_table: str) ->
             row for row in edited_columns
             if normalize_identifier(str(row["new_name"])) != str(row["current_name"])
         ]
+        new_primary_keys = [
+            normalize_identifier(str(row["new_name"]))
+            for row in edited_columns
+            if row.get("new_primary_key")
+        ]
+        primary_key_changed = new_primary_keys != current_primary_keys
+        current_order = [str(row["column_name"]) for _, row in schema.iterrows()]
+        sorted_columns = sorted(
+            edited_columns,
+            key=lambda row: (int(row.get("position") or 999999), str(row["current_name"])),
+        )
+        new_column_order = [
+            normalize_identifier(str(row["new_name"]))
+            for row in sorted_columns
+        ]
+        column_order_changed = new_column_order != current_order
 
         if type_changes:
             changed = ", ".join(
@@ -1043,6 +1823,8 @@ def render_column_editor(con: duckdb.DuckDBPyConnection, selected_table: str) ->
                 for row in type_changes
             )
             st.warning(t("pending_type_changes", changes=changed))
+        if column_order_changed:
+            st.warning(t("reorder_warning"))
 
         confirm_text = st.text_input(
             t("confirm_apply_columns", table=selected_table),
@@ -1050,7 +1832,7 @@ def render_column_editor(con: duckdb.DuckDBPyConnection, selected_table: str) ->
         )
 
         if st.button(t("apply_column_changes"), key=f"apply_columns_{selected_table}"):
-            if not rename_changes and not type_changes:
+            if not rename_changes and not type_changes and not primary_key_changed and not column_order_changed:
                 st.info(t("no_column_changes"))
                 return
 
@@ -1081,16 +1863,6 @@ def render_column_editor(con: duckdb.DuckDBPyConnection, selected_table: str) ->
                     )
                     applied_renames[current_name] = new_name
 
-                for old_name, new_name in applied_renames.items():
-                    con.execute(
-                        "UPDATE app_relationships SET from_column = ? WHERE from_table = ? AND from_column = ?",
-                        [new_name, selected_table, old_name],
-                    )
-                    con.execute(
-                        "UPDATE app_relationships SET to_column = ? WHERE to_table = ? AND to_column = ?",
-                        [new_name, selected_table, old_name],
-                    )
-
                 for row in edited_columns:
                     original_name = str(row["current_name"])
                     column_name = applied_renames.get(original_name, original_name)
@@ -1107,6 +1879,39 @@ def render_column_editor(con: duckdb.DuckDBPyConnection, selected_table: str) ->
                         SET DATA TYPE {new_type}
                         USING TRY_CAST({quote_identifier(column_name)} AS {new_type})
                         """
+                    )
+
+                if primary_key_changed or column_order_changed:
+                    updated_primary_keys = [
+                        applied_renames.get(
+                            str(row["current_name"]),
+                            normalize_identifier(str(row["new_name"])),
+                        )
+                        for row in edited_columns
+                        if row.get("new_primary_key")
+                    ]
+                    updated_foreign_keys = []
+                    for relationship in get_table_foreign_key_rows(con, selected_table):
+                        relationship["from_column"] = applied_renames.get(
+                            relationship["from_column"],
+                            relationship["from_column"],
+                        )
+                        updated_foreign_keys.append(relationship)
+
+                    updated_column_order = [
+                        applied_renames.get(
+                            str(row["current_name"]),
+                            normalize_identifier(str(row["new_name"])),
+                        )
+                        for row in sorted_columns
+                    ]
+
+                    rebuild_table_preserving_references(
+                        con,
+                        selected_table,
+                        updated_primary_keys if primary_key_changed else get_primary_key_columns(con, selected_table),
+                        updated_foreign_keys,
+                        updated_column_order,
                     )
 
                 st.success(t("column_changes_applied"))
@@ -1145,7 +1950,7 @@ def render_data_browser(con: duckdb.DuckDBPyConnection) -> None:
     query += " LIMIT 1000"
     result = con.execute(query, params).fetchdf()
 
-    st.dataframe(result, use_container_width=True)
+    st.dataframe(result, use_container_width=True, hide_index=True)
 
     csv = result.to_csv(index=False).encode("utf-8")
     st.download_button(
@@ -1159,12 +1964,14 @@ def render_data_browser(con: duckdb.DuckDBPyConnection) -> None:
 def main() -> None:
     st.set_page_config(page_title="Data Constructor", layout="wide")
 
-    language_label = st.sidebar.selectbox(
+    current_language = get_language()
+    selected_language = st.sidebar.selectbox(
         t("language"),
-        list(LANGUAGE_OPTIONS.keys()),
-        index=0 if get_language() == "en" else 1,
+        LANGUAGE_CODES,
+        index=LANGUAGE_CODES.index(current_language) if current_language in LANGUAGE_CODES else 0,
+        format_func=language_label,
     )
-    st.session_state.language = LANGUAGE_OPTIONS[language_label]
+    st.session_state.language = selected_language
 
     selected_theme = st.sidebar.selectbox(
         t("theme"),
@@ -1181,10 +1988,10 @@ def main() -> None:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
 
     con = duckdb.connect(DB_PATH)
-    ensure_meta_tables(con)
+    cleanup_rebuild_tables(con)
 
-    tab_import, tab_relationships, tab_schema, tab_browse = st.tabs(
-        [t("import"), t("relationships"), t("schema"), t("browse")]
+    tab_import, tab_relationships, tab_schema, tab_query, tab_browse = st.tabs(
+        [t("import"), t("relationships"), t("schema"), t("query"), t("browse")]
     )
     with tab_import:
         render_upload_import(con)
@@ -1192,6 +1999,8 @@ def main() -> None:
         render_relationships(con)
     with tab_schema:
         render_schema_visualization(con)
+    with tab_query:
+        render_related_query(con)
     with tab_browse:
         render_data_browser(con)
 

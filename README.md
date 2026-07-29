@@ -13,11 +13,13 @@ The app lets you:
 - include or remove columns;
 - add blank columns;
 - edit column data types;
+- choose primary key columns during import;
 - create or replace a DuckDB table;
-- define relationships between imported tables;
-- visualize tables and saved relationships in an ERD-style schema designer;
+- define real DuckDB foreign key relationships between imported tables;
+- visualize tables and SQL foreign keys in an ERD-style schema designer;
+- query related tables with joins, selected columns, search, sorting, and export;
 - rename, clear, or delete imported tables;
-- rename columns and change column data types with conversion warnings;
+- rename columns, change column data types, and edit primary keys with conversion warnings;
 - browse, search, and export table data.
 
 ## Run locally
@@ -43,3 +45,11 @@ python -m venv .venv
 ```
 
 Uploaded source files are stored in `data/raw`. The local DuckDB database is `data/app.duckdb`.
+
+Interface translations are stored in `locales/translations.json`. Add or edit UI text there instead of editing `app.py`.
+
+## Relationships
+
+Relationships are created as real DuckDB `FOREIGN KEY` constraints. The referenced column is made a `PRIMARY KEY`, so it must be unique and not null. Existing child values must already exist in the referenced parent column.
+
+For `one-to-many`, the app treats the source table as the parent and creates the SQL foreign key in the target table. Use `Check relationship` to preview type mismatches, duplicate parent keys, null parent keys, and missing child references before saving.
