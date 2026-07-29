@@ -711,6 +711,13 @@ def relationship_exists(
     return not matches.empty
 
 
+def format_relationship_label(relationship: dict) -> str:
+    return (
+        f"{relationship['from_table']}.{relationship['from_column']} -> "
+        f"{relationship['to_table']}.{relationship['to_column']}"
+    )
+
+
 def resolve_sql_fk_direction(
     source_table: str,
     source_column: str,
@@ -809,6 +816,61 @@ def build_table_constraint_definitions(
     return definitions
 
 
+def remap_relationship_rows_for_table(
+    relationship_rows: list[dict],
+    table_name: str,
+    column_renames: dict[str, str] | None = None,
+) -> list[dict]:
+    if column_renames is None:
+        column_renames = {}
+
+    remapped_rows = []
+    for relationship in relationship_rows:
+        remapped = relationship.copy()
+        if remapped["from_table"] == table_name:
+            remapped["from_column"] = column_renames.get(
+                remapped["from_column"],
+                remapped["from_column"],
+            )
+        if remapped["to_table"] == table_name:
+            remapped["to_column"] = column_renames.get(
+                remapped["to_column"],
+                remapped["to_column"],
+            )
+        remapped_rows.append(remapped)
+    return remapped_rows
+
+
+def validate_relationship_columns_for_rebuild(
+    table_name: str,
+    column_names: list[str],
+    relationship_rows: list[dict],
+) -> None:
+    available_columns = set(column_names)
+    missing_columns = sorted(
+        {
+            relationship["from_column"]
+            for relationship in relationship_rows
+            if relationship["from_table"] == table_name
+            and relationship["from_column"] not in available_columns
+        }
+        | {
+            relationship["to_column"]
+            for relationship in relationship_rows
+            if relationship["to_table"] == table_name
+            and relationship["to_column"] not in available_columns
+        }
+    )
+    if missing_columns:
+        raise ValueError(
+            t(
+                "relationship_columns_required",
+                table=table_name,
+                columns=", ".join(missing_columns),
+            )
+        )
+
+
 def get_table_foreign_key_rows(con: duckdb.DuckDBPyConnection, table_name: str) -> list[dict]:
     relationships = get_relationships(con)
     return [
@@ -870,12 +932,17 @@ def rebuild_table_with_constraints(
     primary_key_columns: list[str],
     foreign_key_rows: list[dict] | None = None,
     column_order: list[str] | None = None,
+    column_definitions: list[str] | None = None,
+    target_columns: list[str] | None = None,
+    select_parts: list[str] | None = None,
+    source_relation: str | None = None,
+    manage_transaction: bool = True,
 ) -> None:
     schema = get_table_schema(con, table_name)
     temp_table = normalize_identifier(f"app_rebuild_{table_name}_{uuid.uuid4().hex[:8]}", "tmp")
     if foreign_key_rows is None:
         foreign_key_rows = get_table_foreign_key_rows(con, table_name)
-    if column_order:
+    if column_definitions is None and column_order:
         schema = (
             schema.assign(
                 sort_order=schema["column_name"].map(
@@ -885,17 +952,32 @@ def rebuild_table_with_constraints(
             .sort_values("sort_order")
             .drop(columns=["sort_order"])
         )
-    column_definitions = [
-        f"{quote_identifier(str(row['column_name']))} {row['column_type']}"
-        for _, row in schema.iterrows()
-    ]
+    if target_columns is None:
+        target_columns = [
+            str(row["column_name"])
+            for _, row in schema.iterrows()
+        ]
+    if column_definitions is None:
+        column_definitions = [
+            f"{quote_identifier(str(row['column_name']))} {row['column_type']}"
+            for _, row in schema.iterrows()
+        ]
+    if select_parts is None:
+        select_parts = [
+            quote_identifier(str(row["column_name"]))
+            for _, row in schema.iterrows()
+        ]
+    if source_relation is None:
+        source_relation = quote_identifier(table_name)
+
     constraint_definitions = build_table_constraint_definitions(primary_key_columns, foreign_key_rows)
     columns_sql = ", ".join(
-        quote_identifier(str(row["column_name"]))
-        for _, row in schema.iterrows()
+        quote_identifier(column)
+        for column in target_columns
     )
 
-    con.execute("BEGIN")
+    if manage_transaction:
+        con.execute("BEGIN")
     try:
         con.execute(
             f"""
@@ -907,8 +989,8 @@ def rebuild_table_with_constraints(
         con.execute(
             f"""
             INSERT INTO {quote_identifier(temp_table)} ({columns_sql})
-            SELECT {columns_sql}
-            FROM {quote_identifier(table_name)}
+            SELECT {", ".join(select_parts)}
+            FROM {source_relation}
             """
         )
         con.execute(f"DROP TABLE {quote_identifier(table_name)}")
@@ -927,10 +1009,12 @@ def rebuild_table_with_constraints(
             """
         )
         con.execute(f"DROP TABLE {quote_identifier(temp_table)}")
-        con.execute("COMMIT")
+        if manage_transaction:
+            con.execute("COMMIT")
     except Exception:
-        con.execute("ROLLBACK")
-        cleanup_rebuild_tables(con)
+        if manage_transaction:
+            con.execute("ROLLBACK")
+            cleanup_rebuild_tables(con)
         raise
 
 
@@ -940,48 +1024,87 @@ def rebuild_table_preserving_references(
     primary_key_columns: list[str],
     foreign_key_rows: list[dict],
     column_order: list[str] | None = None,
+    column_definitions: list[str] | None = None,
+    target_columns: list[str] | None = None,
+    select_parts: list[str] | None = None,
+    source_relation: str | None = None,
+    column_renames: dict[str, str] | None = None,
+    manage_transaction: bool = True,
 ) -> None:
     relationships_before = get_relationships(con)
-    all_relationship_rows = dataframe_relationship_rows(relationships_before)
-    referencing_subtree = get_referencing_subtree(relationships_before, table_name)
-
-    # Detach deepest children first, so DuckDB allows rebuilding their parents.
-    for child_table in referencing_subtree:
-        rebuild_table_with_constraints(
-            con,
-            child_table,
-            get_primary_key_columns(con, child_table),
-            [],
-        )
-
-    rebuild_table_with_constraints(
-        con,
+    all_relationship_rows = remap_relationship_rows_for_table(
+        dataframe_relationship_rows(relationships_before),
         table_name,
-        primary_key_columns,
-        foreign_key_rows,
-        column_order,
+        column_renames,
     )
-
-    # Restore parents before children, so referenced keys already exist.
-    for child_table in reversed(referencing_subtree):
-        child_relationships = [
-            row for row in all_relationship_rows if row["from_table"] == child_table
+    all_relationship_rows = [
+        row
+        for row in all_relationship_rows
+        if row["from_table"] != table_name
+    ] + foreign_key_rows
+    referencing_subtree = get_referencing_subtree(relationships_before, table_name)
+    if target_columns is None:
+        target_columns = [
+            str(row["column_name"])
+            for _, row in get_table_schema(con, table_name).iterrows()
         ]
-        for relationship in child_relationships:
-            validate_relationship_data(
+    validate_relationship_columns_for_rebuild(table_name, target_columns, all_relationship_rows)
+
+    if manage_transaction:
+        cleanup_rebuild_tables(con)
+        con.execute("BEGIN")
+    try:
+        # Detach deepest children first, so DuckDB allows rebuilding their parents.
+        for child_table in referencing_subtree:
+            rebuild_table_with_constraints(
                 con,
-                relationship["from_table"],
-                relationship["from_column"],
-                relationship["to_table"],
-                relationship["to_column"],
+                child_table,
+                get_primary_key_columns(con, child_table),
+                [],
+                manage_transaction=False,
             )
-            ensure_primary_key(con, relationship["to_table"], relationship["to_column"])
+
         rebuild_table_with_constraints(
             con,
-            child_table,
-            get_primary_key_columns(con, child_table),
-            child_relationships,
+            table_name,
+            primary_key_columns,
+            foreign_key_rows,
+            column_order,
+            column_definitions,
+            target_columns,
+            select_parts,
+            source_relation,
+            manage_transaction=False,
         )
+
+        # Restore parents before children, so referenced keys already exist.
+        for child_table in reversed(referencing_subtree):
+            child_relationships = [
+                row for row in all_relationship_rows if row["from_table"] == child_table
+            ]
+            for relationship in child_relationships:
+                validate_relationship_data(
+                    con,
+                    relationship["from_table"],
+                    relationship["from_column"],
+                    relationship["to_table"],
+                    relationship["to_column"],
+                )
+                ensure_primary_key(con, relationship["to_table"], relationship["to_column"])
+            rebuild_table_with_constraints(
+                con,
+                child_table,
+                get_primary_key_columns(con, child_table),
+                child_relationships,
+                manage_transaction=False,
+            )
+        if manage_transaction:
+            con.execute("COMMIT")
+    except Exception:
+        if manage_transaction:
+            con.execute("ROLLBACK")
+            cleanup_rebuild_tables(con)
+        raise
 
 
 def create_sql_foreign_key_relationship(
@@ -1002,43 +1125,105 @@ def create_sql_foreign_key_relationship(
         raise ValueError(t("relationship_exists"))
 
     validate_relationship_data(con, from_table, from_column, to_table, to_column)
-    ensure_primary_key(con, to_table, to_column)
-
-    child_relationships = [
-        {
-            "from_table": str(row["from_table"]),
-            "from_column": str(row["from_column"]),
-            "to_table": str(row["to_table"]),
-            "to_column": str(row["to_column"]),
-            "relationship_type": str(row["relationship_type"]),
-        }
-        for _, row in relationships[relationships["from_table"] == from_table].iterrows()
-    ]
-    child_relationships.append(
-        {
-            "from_table": from_table,
-            "from_column": from_column,
-            "to_table": to_table,
-            "to_column": to_column,
-            "relationship_type": relationship_type,
-        }
-    )
-
-    for relationship in child_relationships:
-        validate_relationship_data(
-            con,
-            relationship["from_table"],
-            relationship["from_column"],
-            relationship["to_table"],
-            relationship["to_column"],
+    parent_primary_keys = get_primary_key_columns(con, to_table)
+    if parent_primary_keys and parent_primary_keys != [to_column]:
+        raise ValueError(
+            f"{to_table} already has primary key: {', '.join(parent_primary_keys)}"
         )
-        ensure_primary_key(con, relationship["to_table"], relationship["to_column"])
+
+    con.execute("BEGIN")
+    try:
+        if not parent_primary_keys:
+            rebuild_table_preserving_references(
+                con,
+                to_table,
+                [to_column],
+                get_table_foreign_key_rows(con, to_table),
+                manage_transaction=False,
+            )
+
+        relationships = get_relationships(con)
+        child_relationships = [
+            {
+                "from_table": str(row["from_table"]),
+                "from_column": str(row["from_column"]),
+                "to_table": str(row["to_table"]),
+                "to_column": str(row["to_column"]),
+                "relationship_type": str(row["relationship_type"]),
+            }
+            for _, row in relationships[relationships["from_table"] == from_table].iterrows()
+        ]
+        child_relationships.append(
+            {
+                "from_table": from_table,
+                "from_column": from_column,
+                "to_table": to_table,
+                "to_column": to_column,
+                "relationship_type": relationship_type,
+            }
+        )
+
+        for relationship in child_relationships:
+            validate_relationship_data(
+                con,
+                relationship["from_table"],
+                relationship["from_column"],
+                relationship["to_table"],
+                relationship["to_column"],
+            )
+            ensure_primary_key(con, relationship["to_table"], relationship["to_column"])
+
+        rebuild_table_preserving_references(
+            con,
+            from_table,
+            get_primary_key_columns(con, from_table),
+            child_relationships,
+            manage_transaction=False,
+        )
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        cleanup_rebuild_tables(con)
+        raise
+
+
+def delete_sql_foreign_key_relationship(
+    con: duckdb.DuckDBPyConnection,
+    from_table: str,
+    from_column: str,
+    to_table: str,
+    to_column: str,
+) -> None:
+    cleanup_rebuild_tables(con)
+    relationships = get_relationships(con)
+    if not relationship_exists(relationships, from_table, from_column, to_table, to_column):
+        raise ValueError(t("relationship_not_found"))
+
+    remaining_foreign_keys = []
+    for _, row in relationships[relationships["from_table"] == from_table].iterrows():
+        is_selected_relationship = (
+            str(row["from_table"]) == from_table
+            and str(row["from_column"]) == from_column
+            and str(row["to_table"]) == to_table
+            and str(row["to_column"]) == to_column
+        )
+        if is_selected_relationship:
+            continue
+        remaining_foreign_keys.append(
+            {
+                "from_table": str(row["from_table"]),
+                "from_column": str(row["from_column"]),
+                "to_table": str(row["to_table"]),
+                "to_column": str(row["to_column"]),
+                "relationship_type": str(row["relationship_type"]),
+            }
+        )
 
     rebuild_table_preserving_references(
         con,
         from_table,
         get_primary_key_columns(con, from_table),
-        child_relationships,
+        remaining_foreign_keys,
     )
 
 
@@ -1524,6 +1709,51 @@ def create_table_from_schema(
     table_name: str,
     schema_rows: list[dict],
 ) -> None:
+    created_columns, column_definitions, select_parts, primary_key_columns = prepare_schema_creation_parts(schema_rows)
+
+    con.register("uploaded_df", df)
+    try:
+        if table_exists(con, table_name):
+            relationships = dataframe_relationship_rows(get_relationships(con))
+            validate_relationship_columns_for_rebuild(table_name, created_columns, relationships)
+            required_parent_columns = [
+                relationship["to_column"]
+                for relationship in relationships
+                if relationship["to_table"] == table_name
+                and relationship["to_column"] not in primary_key_columns
+            ]
+            if required_parent_columns:
+                primary_key_columns = primary_key_columns + required_parent_columns
+
+            rebuild_table_preserving_references(
+                con,
+                table_name,
+                primary_key_columns,
+                [
+                    relationship
+                    for relationship in relationships
+                    if relationship["from_table"] == table_name
+                ],
+                column_definitions=column_definitions,
+                target_columns=created_columns,
+                select_parts=select_parts,
+                source_relation="uploaded_df",
+            )
+        else:
+            create_new_table_from_select(
+                con,
+                table_name,
+                column_definitions,
+                created_columns,
+                select_parts,
+                "uploaded_df",
+                primary_key_columns,
+            )
+    finally:
+        con.unregister("uploaded_df")
+
+
+def prepare_schema_creation_parts(schema_rows: list[dict]) -> tuple[list[str], list[str], list[str], list[str]]:
     selected_rows = [row for row in schema_rows if row.get("include")]
     if not selected_rows:
         raise ValueError("Select at least one column.")
@@ -1558,12 +1788,22 @@ def create_table_from_schema(
             f"TRY_CAST({source_sql} AS {data_type}) AS {quote_identifier(column_name)}"
         )
 
-    constraints = build_table_constraint_definitions(primary_key_columns, [])
-    columns_sql = ", ".join(quote_identifier(column) for column in created_columns)
+    return created_columns, column_definitions, select_parts, primary_key_columns
 
-    con.register("uploaded_df", df)
+
+def create_new_table_from_select(
+    con: duckdb.DuckDBPyConnection,
+    table_name: str,
+    column_definitions: list[str],
+    target_columns: list[str],
+    select_parts: list[str],
+    source_relation: str,
+    primary_key_columns: list[str],
+) -> None:
+    constraints = build_table_constraint_definitions(primary_key_columns, [])
+    columns_sql = ", ".join(quote_identifier(column) for column in target_columns)
+    con.execute("BEGIN")
     try:
-        con.execute(f"DROP TABLE IF EXISTS {quote_identifier(table_name)}")
         con.execute(
             f"""
             CREATE TABLE {quote_identifier(table_name)} (
@@ -1575,11 +1815,13 @@ def create_table_from_schema(
             f"""
             INSERT INTO {quote_identifier(table_name)} ({columns_sql})
             SELECT {", ".join(select_parts)}
-            FROM uploaded_df
+            FROM {source_relation}
             """
         )
-    finally:
-        con.unregister("uploaded_df")
+        con.execute("COMMIT")
+    except Exception:
+        con.execute("ROLLBACK")
+        raise
 
 
 def render_upload_import(con: duckdb.DuckDBPyConnection) -> None:
@@ -1746,6 +1988,45 @@ def render_relationships(con: duckdb.DuckDBPyConnection) -> None:
 
     if not relationships.empty:
         st.dataframe(relationships, use_container_width=True, hide_index=True)
+        render_delete_relationship(con, relationships)
+
+
+def render_delete_relationship(con: duckdb.DuckDBPyConnection, relationships: pd.DataFrame) -> None:
+    with st.expander(t("delete_relationship")):
+        relationship_rows = dataframe_relationship_rows(relationships)
+        relationship_options = {
+            format_relationship_label(relationship): relationship
+            for relationship in relationship_rows
+        }
+        selected_relationship_label = st.selectbox(
+            t("relationship_to_delete"),
+            list(relationship_options.keys()),
+            key="delete_relationship_select",
+        )
+        st.caption(t("delete_relationship_caption"))
+        delete_confirm = st.text_input(
+            t("confirm_delete_relationship"),
+            key="delete_relationship_confirm",
+        )
+        if st.button(t("delete_relationship"), key="delete_relationship_btn"):
+            if delete_confirm != "DELETE":
+                st.error(t("confirmation_mismatch_required"))
+                return
+
+            selected_relationship = relationship_options[selected_relationship_label]
+            try:
+                delete_sql_foreign_key_relationship(
+                    con,
+                    selected_relationship["from_table"],
+                    selected_relationship["from_column"],
+                    selected_relationship["to_table"],
+                    selected_relationship["to_column"],
+                )
+                st.success(t("relationship_deleted", relationship=selected_relationship_label))
+                st.rerun()
+            except Exception as exc:
+                logging.exception("Failed to delete SQL foreign key relationship")
+                st.error(str(exc))
 
 
 def render_schema_visualization(con: duckdb.DuckDBPyConnection) -> None:
@@ -2130,71 +2411,54 @@ def render_column_editor(con: duckdb.DuckDBPyConnection, selected_table: str) ->
                         raise ValueError(f"Duplicate column name: {normalized_name}")
                     used_names.add(normalized_name)
 
-                applied_renames = {}
-                for row in edited_columns:
+                column_renames = {
+                    str(row["current_name"]): normalize_identifier(str(row["new_name"]))
+                    for row in edited_columns
+                    if normalize_identifier(str(row["new_name"])) != str(row["current_name"])
+                }
+                updated_primary_keys = [
+                    normalize_identifier(str(row["new_name"]))
+                    for row in edited_columns
+                    if row.get("new_primary_key")
+                ]
+                updated_foreign_keys = []
+                for relationship in get_table_foreign_key_rows(con, selected_table):
+                    relationship["from_column"] = column_renames.get(
+                        relationship["from_column"],
+                        relationship["from_column"],
+                    )
+                    updated_foreign_keys.append(relationship)
+
+                rebuilt_columns = []
+                rebuilt_definitions = []
+                rebuilt_select_parts = []
+                for row in sorted_columns:
                     current_name = str(row["current_name"])
                     new_name = normalize_identifier(str(row["new_name"]))
-                    if new_name == current_name:
-                        continue
-
-                    con.execute(
-                        f"""
-                        ALTER TABLE {quote_identifier(selected_table)}
-                        RENAME COLUMN {quote_identifier(current_name)} TO {quote_identifier(new_name)}
-                        """
-                    )
-                    applied_renames[current_name] = new_name
-
-                for row in edited_columns:
-                    original_name = str(row["current_name"])
-                    column_name = applied_renames.get(original_name, original_name)
                     new_type = str(row["new_type"])
                     current_type = str(row["current_type"])
-
+                    rebuilt_columns.append(new_name)
+                    rebuilt_definitions.append(f"{quote_identifier(new_name)} {new_type}")
                     if new_type == current_type:
-                        continue
-
-                    con.execute(
-                        f"""
-                        ALTER TABLE {quote_identifier(selected_table)}
-                        ALTER COLUMN {quote_identifier(column_name)}
-                        SET DATA TYPE {new_type}
-                        USING TRY_CAST({quote_identifier(column_name)} AS {new_type})
-                        """
-                    )
-
-                if primary_key_changed or column_order_changed:
-                    updated_primary_keys = [
-                        applied_renames.get(
-                            str(row["current_name"]),
-                            normalize_identifier(str(row["new_name"])),
+                        rebuilt_select_parts.append(
+                            f"{quote_identifier(current_name)} AS {quote_identifier(new_name)}"
                         )
-                        for row in edited_columns
-                        if row.get("new_primary_key")
-                    ]
-                    updated_foreign_keys = []
-                    for relationship in get_table_foreign_key_rows(con, selected_table):
-                        relationship["from_column"] = applied_renames.get(
-                            relationship["from_column"],
-                            relationship["from_column"],
+                    else:
+                        rebuilt_select_parts.append(
+                            f"TRY_CAST({quote_identifier(current_name)} AS {new_type}) AS {quote_identifier(new_name)}"
                         )
-                        updated_foreign_keys.append(relationship)
 
-                    updated_column_order = [
-                        applied_renames.get(
-                            str(row["current_name"]),
-                            normalize_identifier(str(row["new_name"])),
-                        )
-                        for row in sorted_columns
-                    ]
-
-                    rebuild_table_preserving_references(
-                        con,
-                        selected_table,
-                        updated_primary_keys if primary_key_changed else get_primary_key_columns(con, selected_table),
-                        updated_foreign_keys,
-                        updated_column_order,
-                    )
+                rebuild_table_preserving_references(
+                    con,
+                    selected_table,
+                    updated_primary_keys,
+                    updated_foreign_keys,
+                    column_definitions=rebuilt_definitions,
+                    target_columns=rebuilt_columns,
+                    select_parts=rebuilt_select_parts,
+                    source_relation=quote_identifier(selected_table),
+                    column_renames=column_renames,
+                )
 
                 st.success(t("column_changes_applied"))
                 st.rerun()

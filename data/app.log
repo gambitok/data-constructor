@@ -23,3 +23,9 @@ Traceback (most recent call last):
     self._sock.shutdown(socket.SHUT_RDWR)
     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
 ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-07-29 15:31:13,780 ERROR Failed to delete table: donors
+Traceback (most recent call last):
+  File "C:\Users\gambi\PhpstormProjects\test\app.py", line 2225, in render_table_actions
+    con.execute(f"DROP TABLE {quote_identifier(selected_table)}")
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_duckdb.CatalogException: Catalog Error: Could not drop the table because this table is main key table of the table "contracts"

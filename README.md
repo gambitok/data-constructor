@@ -15,7 +15,7 @@ The app lets you:
 - edit column data types;
 - choose primary key columns during import;
 - create or replace a DuckDB table;
-- define real DuckDB foreign key relationships between imported tables;
+- define and delete real DuckDB foreign key relationships between imported tables;
 - visualize tables and SQL foreign keys in an ERD-style schema designer;
 - query related tables with joins, selected columns, search, sorting, and CSV/Excel export;
 - save, apply, and delete related-query templates manually;
@@ -55,3 +55,5 @@ Interface translations are stored in `locales/translations.json`. Add or edit UI
 Relationships are created as real DuckDB `FOREIGN KEY` constraints. The referenced column is made a `PRIMARY KEY`, so it must be unique and not null. Existing child values must already exist in the referenced parent column.
 
 For `one-to-many`, the app treats the source table as the parent and creates the SQL foreign key in the target table. Use `Check relationship` to preview type mismatches, duplicate parent keys, null parent keys, and missing child references before saving.
+
+Deleting a relationship removes only the SQL foreign key constraint. Table data is not deleted.
